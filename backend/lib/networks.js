@@ -12,8 +12,8 @@ const execAsync = promisify(exec);
 function classifyInterface(name, device) {
   const s = `${name} ${device}`.toLowerCase();
   if (/wi-?fi|wireless|wlan|airport|802\.11/.test(s)) return 'wifi';
+  if (/iphone|ipad|tether|hotspot|cellular|mobile|usb|rndis|feth|samsung|android/.test(s)) return 'cellular';
   if (/ethernet|lan|gigabit|usb.*lan/.test(s)) return 'ethernet';
-  if (/iphone|ipad|tether|hotspot|cellular|mobile|usb|rndis/.test(s)) return 'cellular';
   if (/bridge|thunderbolt bridge/.test(s)) return 'bridge';
   return 'other';
 }
@@ -135,7 +135,16 @@ export class NetworkManager {
       if (!addrs) continue;
       for (const addr of addrs) {
         if (addr.family === 'IPv4' && !addr.internal) {
-          const humanName = this.hardwarePorts.get(device) || (device.startsWith('en') ? `Interface (${device})` : device);
+          let humanName = this.hardwarePorts.get(device);
+          if (!humanName) {
+            if (device.startsWith('feth')) {
+              humanName = 'Android USB Tethering (Galaxy S23)';
+            } else if (device.startsWith('en')) {
+              humanName = `Interface (${device})`;
+            } else {
+              humanName = device;
+            }
+          }
           const type = classifyInterface(humanName, device);
           list.push({
             id: device,
