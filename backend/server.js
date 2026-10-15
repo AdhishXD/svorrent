@@ -57,19 +57,23 @@ async function pickPort(preferred) {
 const TORRENT_PORT = await pickPort(Number(process.env.TORRENT_PORT) || 51413);
 const limit = (v) => (v ? Number(v) * 1024 : -1);
 
+const BASE_MAX_CONNS = Number(process.env.MAX_CONNS) || 120;
+
 const client = new WebTorrent({
   secure: 1, // Protocol Encryption (PE) with plaintext fallback
-  maxConns: Number(process.env.MAX_CONNS) || 200,
+  maxConns: BASE_MAX_CONNS,
   torrentPort: TORRENT_PORT,
   dhtPort: TORRENT_PORT ? TORRENT_PORT + 1 : 0,
   dht: true,
-  lsd: true,
-  utp: true,
-  natUpnp: true,
-  natPmp: true,
+  // Plexo architecture patterns for multi-interface bonding:
+  utp: false, // Must be false: uTP UDP sockets bypass TCP localAddress binding; TCP guarantees per-interface routing
+  webSeeds: false, // Disable web seeds so HTTP doesn't bypass multi-interface socket striping
+  lsd: false, // Disable local peer discovery to avoid unrouted broadcast swarms
+  natUpnp: false, // Disable UPnP port mapping
+  natPmp: false, // Disable NAT-PMP port mapping
   downloadLimit: limit(process.env.DOWNLOAD_LIMIT_KB),
   uploadLimit: limit(process.env.UPLOAD_LIMIT_KB),
-  tracker: { announce: TRACKERS },
+  tracker: { announce: TRACKERS, wrtc: false }, // Disable WebRTC so all peers go through TCP connect hook
 });
 
 client.on('error', (err) => console.error('[engine] client error:', err.message));

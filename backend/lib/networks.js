@@ -63,6 +63,7 @@ export class NetworkManager {
     this.hardwarePorts = new Map();
     this.roundRobinIndex = 0;
     this.wireToInterface = new WeakMap();
+    this.socketToInterface = new WeakMap();
     this.stats = new Map(); // id -> { downloaded: 0, uploaded: 0, currentDown: 0, currentUp: 0, peers: 0, history: [] }
 
     // Start background scanner
@@ -92,22 +93,34 @@ export class NetworkManager {
     net.connect = function (...args) {
       let opts = args[0];
       let cb = args[1];
+      let chosen = null;
 
       if (typeof opts === 'number') {
         const port = opts;
         const host = typeof args[1] === 'string' ? args[1] : 'localhost';
         cb = typeof args[1] === 'function' ? args[1] : args[2];
-        const chosen = self.pickInterface();
+        chosen = self.pickInterface();
         opts = { port, host };
         if (chosen && chosen.ip) {
           opts.localAddress = chosen.ip;
         }
-        return originalConnect.call(this, opts, cb);
-      } else if (opts && typeof opts === 'object' && opts.host && opts.port && !opts.localAddress) {
-        const chosen = self.pickInterface();
-        if (chosen && chosen.ip) {
-          opts.localAddress = chosen.ip;
+        const socket = originalConnect.call(this, opts, cb);
+        if (chosen) {
+          self.socketToInterface.set(socket, chosen.id);
         }
+        return socket;
+      } else if (opts && typeof opts === 'object') {
+        if (opts.host && opts.port && !opts.localAddress) {
+          chosen = self.pickInterface();
+          if (chosen && chosen.ip) {
+            opts.localAddress = chosen.ip;
+          }
+        }
+        const socket = originalConnect.apply(this, args);
+        if (chosen) {
+          self.socketToInterface.set(socket, chosen.id);
+        }
+        return socket;
       }
       return originalConnect.apply(this, args);
     };
@@ -163,13 +176,36 @@ export class NetworkManager {
     return list;
   }
 
+  /**
+   * Plexo fewest-peers-first load balancing:
+   * Selects the interface currently handling the fewest active peer connections.
+   * A faster network naturally pulls more torrent blocks because its peers answer
+   * requests quicker and request queues stay replenished.
+   */
   pickInterface() {
-    // Only pick physically connected interfaces with valid IPv4
-    const available = this.getAllInterfaces().filter((iface) => iface.connected && iface.ip && !this.disabledIds.has(iface.id));
+    const available = this.getAllInterfaces().filter(
+      (iface) => iface.connected && iface.ip && !this.disabledIds.has(iface.id)
+    );
     if (available.length === 0) return null;
-    const chosen = available[this.roundRobinIndex % available.length];
-    this.roundRobinIndex++;
-    return chosen;
+    if (available.length === 1) return available[0];
+
+    let best = null;
+    let minPeers = Infinity;
+
+    for (const iface of available) {
+      const peerCount = this.stats.get(iface.id)?.peers ?? 0;
+      if (peerCount < minPeers) {
+        minPeers = peerCount;
+        best = iface;
+      }
+    }
+
+    if (!best) {
+      best = available[this.roundRobinIndex % available.length];
+      this.roundRobinIndex++;
+    }
+
+    return best;
   }
 
   getWireInterface(wire) {
@@ -219,6 +255,29 @@ export class NetworkManager {
 
     const availableActiveIds = ifaces.filter((i) => i.connected && !this.disabledIds.has(i.id)).map((i) => i.id);
 
+    // Plexo reconcile: if an adapter was unplugged or disabled, tear down its remaining wires
+    // so WebTorrent immediately redials on the remaining active interface(s).
+    if (client.torrents) {
+      for (const t of client.torrents) {
+        if (!t.wires) continue;
+        for (const wire of t.wires) {
+          const assignedId = this.wireToInterface.get(wire);
+          if (assignedId && (!availableActiveIds.includes(assignedId) || this.disabledIds.has(assignedId))) {
+            try { wire.destroy(); } catch (e) {}
+          }
+        }
+      }
+    }
+
+    // Dynamic swarm connection scaling (Plexo pattern):
+    // Scales total maxConns based on the number of bonded interfaces
+    if (availableActiveIds.length > 0 && typeof client.maxConns === 'number') {
+      const targetConns = Math.max(120, 60 * availableActiveIds.length);
+      if (client.maxConns !== targetConns) {
+        client.maxConns = targetConns;
+      }
+    }
+
     // Collect throughput directly from all active torrent wires
     let wireIdx = 0;
     if (client.torrents && availableActiveIds.length > 0) {
@@ -226,10 +285,17 @@ export class NetworkManager {
         if (!t.wires) continue;
         for (const wire of t.wires) {
           let ifaceId = this.wireToInterface.get(wire);
-          if (!ifaceId || this.disabledIds.has(ifaceId)) {
-            const localAddr = wire.conn?.localAddress || wire.remoteAddress;
-            const match = ifaces.find((i) => i.ip === localAddr && !this.disabledIds.has(i.id));
-            ifaceId = match ? match.id : availableActiveIds[wireIdx % availableActiveIds.length];
+          if (!ifaceId || !availableActiveIds.includes(ifaceId)) {
+            // 1. Check direct socket map recorded at connect time
+            if (wire.conn && this.socketToInterface.has(wire.conn)) {
+              ifaceId = this.socketToInterface.get(wire.conn);
+            }
+            // 2. Check bound localAddress on socket
+            if (!ifaceId || !availableActiveIds.includes(ifaceId)) {
+              const localAddr = wire.conn?.localAddress || wire.remoteAddress;
+              const match = ifaces.find((i) => i.ip === localAddr && !this.disabledIds.has(i.id));
+              ifaceId = match ? match.id : availableActiveIds[wireIdx % availableActiveIds.length];
+            }
             this.wireToInterface.set(wire, ifaceId);
           }
           wireIdx++;
