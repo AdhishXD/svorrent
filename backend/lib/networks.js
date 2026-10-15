@@ -129,16 +129,14 @@ export class NetworkManager {
   getAllInterfaces() {
     const ifaces = os.networkInterfaces();
     const list = [];
-    const activeDevices = new Set();
 
-    // 1. First get all active interfaces with IPv4
+    // Only return physically connected network interfaces with IPv4
     for (const [device, addrs] of Object.entries(ifaces)) {
       if (!addrs) continue;
       for (const addr of addrs) {
         if (addr.family === 'IPv4' && !addr.internal) {
           const humanName = this.hardwarePorts.get(device) || (device.startsWith('en') ? `Interface (${device})` : device);
           const type = classifyInterface(humanName, device);
-          activeDevices.add(device);
           list.push({
             id: device,
             device,
@@ -150,26 +148,6 @@ export class NetworkManager {
             connected: true,
           });
         }
-      }
-    }
-
-    // 2. Discover known hardware ports on the machine that are in standby / unplugged
-    // Prioritize relevant user-facing ports (iPhone USB, LAN, Ethernet)
-    const priorityPorts = ['en7', 'en10', 'en4', 'en5', 'bridge0'];
-    for (const device of priorityPorts) {
-      if (!activeDevices.has(device) && this.hardwarePorts.has(device)) {
-        const humanName = this.hardwarePorts.get(device);
-        const type = classifyInterface(humanName, device);
-        list.push({
-          id: device,
-          device,
-          name: humanName,
-          ip: null,
-          netmask: null,
-          mac: null,
-          type,
-          connected: false,
-        });
       }
     }
 

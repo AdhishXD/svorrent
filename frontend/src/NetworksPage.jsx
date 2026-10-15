@@ -126,10 +126,6 @@ export function NetworksPage({ notify }) {
   }, [fetchNetworks]);
 
   const toggleAdapter = async (iface) => {
-    if (!iface.connected) {
-      notify(`Connect ${iface.name} via USB or cable first to bond`, 'warn');
-      return;
-    }
     const nextState = !iface.enabled;
     try {
       const res = await apiPost(`/networks/${iface.id}/toggle`, { enabled: nextState });
@@ -176,15 +172,7 @@ export function NetworksPage({ notify }) {
         </div>
       </div>
 
-      {/* Real Multi-Network Hardware Connection Banner */}
-      <div className="how-to-bond-banner">
-        <div className="bond-banner-icon">
-          <Icon name="network" size={18} />
-        </div>
-        <div className="bond-banner-text">
-          <strong>How to bond multiple networks:</strong> Connect your Mac to Wi-Fi normally, then connect a second physical network — e.g. plug in your iPhone or Android phone via USB cable and enable Personal Hotspot, or plug in an Ethernet cable. Svorrent monitors hardware adapters in real time, automatically binds outgoing peer sockets to each network's IP address, and combines their download speeds without requiring special router hardware.
-        </div>
-      </div>
+
 
       {/* Top Telemetry KPI Cards */}
       <div className="stat-grid network-kpi-grid">
@@ -296,16 +284,16 @@ export function NetworksPage({ notify }) {
       {/* Adapters Management Table */}
       <div className="adapters-section">
         <div className="section-head">
-          <h2 className="section-title">Physical Network Adapters</h2>
+          <h2 className="section-title">Network Adapters</h2>
           <span className="section-sub muted">
-            Hardware interfaces discovered on this Mac. Plug in phone tethering or Ethernet to automatically bond.
+            Active physical interfaces on this machine. BitTorrent peer connections are dynamically striped across enabled adapters.
           </span>
         </div>
 
         {loading ? (
-          <div className="empty">Scanning hardware interfaces…</div>
+          <div className="empty">Scanning network interfaces…</div>
         ) : interfaces.length === 0 ? (
-          <div className="empty">No network interfaces detected.</div>
+          <div className="empty">No active network interfaces detected.</div>
         ) : (
           <table className="table table-compact adapters-table">
             <thead>
@@ -324,22 +312,19 @@ export function NetworksPage({ notify }) {
             <tbody>
               {interfaces.map((iface) => {
                 const color = TYPE_COLORS[iface.type] || TYPE_COLORS.other;
-                const isOnline = iface.connected && iface.enabled;
+                const isOnline = iface.enabled;
                 return (
-                  <tr key={iface.id} className={iface.connected ? (iface.enabled ? '' : 'row-disabled') : 'row-standby'}>
+                  <tr key={iface.id} className={iface.enabled ? '' : 'row-disabled'}>
                     <td className="col-status">
                       <span
                         className={`status-dot ${isOnline ? 'is-online' : 'is-offline'}`}
                         style={{ backgroundColor: isOnline ? color : undefined }}
-                        title={iface.connected ? (iface.enabled ? 'Bonded & Active' : 'Routing Disabled') : 'Standby / Disconnected'}
+                        title={iface.enabled ? 'Bonded & Active' : 'Routing Disabled'}
                       />
                     </td>
                     <td>
                       <div className="iface-cell">
                         <span className="iface-name">{iface.name}</span>
-                        {!iface.connected && (
-                          <span className="tag tag-standby">Standby</span>
-                        )}
                       </div>
                       <span className="mono muted iface-device">{iface.device}</span>
                     </td>
@@ -348,33 +333,22 @@ export function NetworksPage({ notify }) {
                         {iface.type.toUpperCase()}
                       </span>
                     </td>
-                    <td className="mono">
-                      {iface.connected && iface.ip ? (
-                        iface.ip
-                      ) : (
-                        <span className="muted">Connect cable/hotspot to activate</span>
-                      )}
-                    </td>
+                    <td className="mono">{iface.ip}</td>
                     <td className="col-num">
-                      {iface.connected ? (
-                        <div className="speed-with-sparkline">
-                          <span className="mono">{formatSpeed(iface.downSpeed)}</span>
-                          <MiniSparkline data={iface.history} color={color} width={64} height={18} />
-                        </div>
-                      ) : (
-                        <span className="muted">—</span>
-                      )}
+                      <div className="speed-with-sparkline">
+                        <span className="mono">{formatSpeed(iface.downSpeed)}</span>
+                        <MiniSparkline data={iface.history} color={color} width={64} height={18} />
+                      </div>
                     </td>
-                    <td className="col-num mono muted">{iface.connected ? formatSpeed(iface.upSpeed) : '—'}</td>
-                    <td className="col-num mono">{iface.connected ? formatBytes(iface.downloaded) : '—'}</td>
-                    <td className="col-num mono">{iface.connected ? (iface.peers ?? 0) : '—'}</td>
+                    <td className="col-num mono muted">{formatSpeed(iface.upSpeed)}</td>
+                    <td className="col-num mono">{formatBytes(iface.downloaded)}</td>
+                    <td className="col-num mono">{iface.peers ?? 0}</td>
                     <td className="col-actions">
                       <button
-                        className={`btn-toggle ${iface.enabled && iface.connected ? 'is-active' : ''}`}
+                        className={`btn-toggle ${iface.enabled ? 'is-active' : ''}`}
                         onClick={() => toggleAdapter(iface)}
-                        disabled={!iface.connected}
                         aria-label={`Toggle routing on ${iface.name}`}
-                        title={iface.connected ? (iface.enabled ? 'Disable adapter' : 'Enable adapter') : 'Connect hardware to enable'}
+                        title={iface.enabled ? 'Disable adapter' : 'Enable adapter'}
                       >
                         <span className="toggle-thumb" />
                       </button>
