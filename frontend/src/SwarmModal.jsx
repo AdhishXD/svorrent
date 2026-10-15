@@ -17,12 +17,11 @@ function getIfaceColor(type) {
   return INTERFACE_COLORS[type] || INTERFACE_COLORS.other;
 }
 
-export function SwarmModal({ torrent, onClose, notify }) {
+export function SwarmModal({ torrent, onClose }) {
   const [data, setData] = useState({
     peers: [],
     summary: { totalPeers: 0, countriesCount: 0, countries: [], interfaces: [] },
   });
-  const [loading, setLoading] = useState(true);
   const [selectedCountry, setSelectedCountry] = useState(null);
   const [selectedInterface, setSelectedInterface] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -43,13 +42,10 @@ export function SwarmModal({ torrent, onClose, notify }) {
     const load = async () => {
       try {
         const res = await apiGet(`/swarm?id=${torrentId}`);
-        if (alive) {
-          setData(res || { peers: [], summary: { totalPeers: 0, countriesCount: 0, countries: [], interfaces: [] } });
-          setLoading(false);
+        if (alive && res) {
+          setData(res);
         }
-      } catch (err) {
-        if (alive && loading) setLoading(false);
-      }
+      } catch {}
     };
 
     load();
@@ -60,7 +56,7 @@ export function SwarmModal({ torrent, onClose, notify }) {
     };
   }, [torrentId]);
 
-  const peers = data.peers || [];
+  const peers = useMemo(() => data.peers || [], [data.peers]);
   const summary = data.summary || { totalPeers: 0, countriesCount: 0, countries: [], interfaces: [] };
 
   // Filter peers based on interface, country, and search query

@@ -128,6 +128,9 @@ export function findPrimaryVideoInTorrent(torrent, downloadDir) {
   };
 }
 
+// Cache for directory primary video lookups: key -> { result, cachedAt }
+const folderPrimaryVideoCache = new Map();
+
 /**
  * Locate the primary video file in a local folder scanner item.
  */
@@ -146,7 +149,13 @@ export function findPrimaryVideoInFolder(item) {
     };
   }
 
-  // Directory item: recursively find video files
+  // Directory item: check cache first
+  const cacheKey = `${item.absolutePath}:${item.mtime || item.sizeOnDisk || 0}`;
+  const cached = folderPrimaryVideoCache.get(cacheKey);
+  if (cached && (Date.now() - cached.cachedAt) < 10000) {
+    return cached.result;
+  }
+
   try {
     const candidates = [];
     function scanDir(dir) {
@@ -167,8 +176,12 @@ export function findPrimaryVideoInFolder(item) {
       }
     }
     scanDir(item.absolutePath);
-    if (candidates.length === 0) return null;
-    return candidates.reduce((a, b) => (a.length > b.length ? a : b));
+    const result = candidates.length > 0
+      ? candidates.reduce((a, b) => (a.length > b.length ? a : b))
+      : null;
+
+    folderPrimaryVideoCache.set(cacheKey, { result, cachedAt: Date.now() });
+    return result;
   } catch (e) {
     return null;
   }

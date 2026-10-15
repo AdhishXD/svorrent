@@ -77,7 +77,7 @@ export function SwarmWorldMap({
             y: bbox.y + bbox.height / 2,
           };
         }
-      } catch (e) {}
+      } catch {}
     });
 
     // Special visual adjustments for countries with distant islands or expansive polygons

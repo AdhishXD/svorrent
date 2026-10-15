@@ -3,20 +3,6 @@ import { Icon } from './Icon';
 import { apiGet, formatBytes, formatSpeed } from './lib';
 import { countryFlag, countryName } from './countryUtils';
 
-function clientName(client) {
-  if (!client) return 'Unknown';
-  if (typeof client === 'string') return client;
-  try {
-    const s = Object.values(client)
-      .map((c) => (typeof c === 'number' ? String.fromCharCode(c) : String(c)))
-      .join('')
-      .trim();
-    return s || 'Unknown';
-  } catch {
-    return 'Unknown';
-  }
-}
-
 class Boundary extends React.Component {
   state = { error: null };
   static getDerivedStateFromError(error) {

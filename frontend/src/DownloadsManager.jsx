@@ -474,7 +474,6 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
         <SwarmModal
           torrent={swarmTorrent}
           onClose={() => setSwarmTorrent(null)}
-          notify={notify}
         />
       )}
     </section>

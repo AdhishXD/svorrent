@@ -38,6 +38,65 @@ function parseClientString(v) {
   return String(v).trim() || 'Unknown';
 }
 
+// Pre-computed 8-bit popcount table for ultra-fast bitfield progress calculation
+const BIT_COUNT_TABLE = new Uint8Array(256);
+for (let i = 0; i < 256; i++) {
+  let count = 0;
+  let n = i;
+  while (n > 0) {
+    count += n & 1;
+    n >>= 1;
+  }
+  BIT_COUNT_TABLE[i] = count;
+}
+
+function computeWireProgress(wire, totalPieces) {
+  if (!wire?.peerPieces || !totalPieces || totalPieces <= 0) return 0;
+
+  // Ultra-fast path: read raw bitfield buffer using precomputed popcount table
+  const buf = wire.peerPieces.buffer;
+  if (buf && Buffer.isBuffer(buf)) {
+    let count = 0;
+    const len = buf.length;
+    for (let i = 0; i < len; i++) {
+      count += BIT_COUNT_TABLE[buf[i]];
+    }
+    return Math.min(100, Math.round((count / totalPieces) * 100));
+  }
+
+  // Fast sampling fallback for very large swarms
+  if (totalPieces > 500) {
+    const samples = 250;
+    const step = totalPieces / samples;
+    let have = 0;
+    for (let i = 0; i < samples; i++) {
+      if (wire.peerPieces.get(Math.floor(i * step))) have++;
+    }
+    return Math.round((have / samples) * 100);
+  }
+
+  let have = 0;
+  for (let i = 0; i < totalPieces; i++) {
+    if (wire.peerPieces.get(i)) have++;
+  }
+  return Math.round((have / totalPieces) * 100);
+}
+
+function getWireClientName(wire) {
+  let rawClient = 'Unknown';
+  if (wire?.peerExtendedHandshake?.v) {
+    rawClient = wire.peerExtendedHandshake.v;
+  } else if (wire?.peerId) {
+    try {
+      const parsed = peerid(wire.peerId);
+      if (parsed?.client) {
+        rawClient = `${parsed.client} ${parsed.version || ''}`.trim();
+      }
+    } catch (e) {}
+  }
+  return parseClientString(rawClient);
+}
+
 function getPeerGeo(remoteIp) {
   if (!remoteIp || remoteIp === '127.0.0.1' || remoteIp.startsWith('10.') || remoteIp.startsWith('192.168.') || remoteIp.startsWith('172.16.')) {
     return { country: 'unknown', countryCode: '??', city: '', region: '', ll: null };
@@ -545,28 +604,8 @@ app.get('/api/torrent/:id/nerd-stats', async (req, res) => {
   }
 
   const peers = (torrent.wires || []).map((wire) => {
-    let rawClient = 'Unknown Client';
-    if (wire.peerExtendedHandshake?.v) {
-      rawClient = wire.peerExtendedHandshake.v;
-    } else if (wire.peerId) {
-      try {
-        const parsed = peerid(wire.peerId);
-        if (parsed?.client) {
-          rawClient = `${parsed.client} ${parsed.version || ''}`.trim();
-        }
-      } catch (e) {}
-    }
-    const clientName = parseClientString(rawClient);
-
-    let peerProgress = 0;
-    if (wire.peerPieces && torrent.pieces?.length > 0) {
-      let piecesHave = 0;
-      for (let i = 0; i < torrent.pieces.length; i++) {
-        if (wire.peerPieces.get(i)) piecesHave++;
-      }
-      peerProgress = Math.round((piecesHave / torrent.pieces.length) * 100);
-    }
-
+    const clientName = getWireClientName(wire);
+    const peerProgress = computeWireProgress(wire, torrent.pieces?.length || 0);
     const iface = networkManager.getWireInterface(wire);
     const remoteIp = wire.remoteAddress || '127.0.0.1';
     const geo = getPeerGeo(remoteIp);
@@ -685,30 +724,10 @@ app.get('/api/swarm', (req, res) => {
       const ifaceDevice = iface ? iface.device : 'en0';
       const ifaceType = iface ? iface.type : 'wifi';
 
-      let rawClient = 'Unknown';
-      if (wire.peerExtendedHandshake?.v) {
-        rawClient = wire.peerExtendedHandshake.v;
-      } else if (wire.peerId) {
-        try {
-          const parsed = peerid(wire.peerId);
-          if (parsed?.client) {
-            rawClient = `${parsed.client} ${parsed.version || ''}`.trim();
-          }
-        } catch (e) {}
-      }
-      const clientStr = parseClientString(rawClient);
-
+      const clientStr = getWireClientName(wire);
       const downSpeed = typeof wire.downloadSpeed === 'function' ? wire.downloadSpeed() : 0;
       const upSpeed = typeof wire.uploadSpeed === 'function' ? wire.uploadSpeed() : 0;
-
-      let peerProgress = 0;
-      if (wire.peerPieces && t.pieces?.length > 0) {
-        let have = 0;
-        for (let i = 0; i < t.pieces.length; i++) {
-          if (wire.peerPieces.get(i)) have++;
-        }
-        peerProgress = Math.round((have / t.pieces.length) * 100);
-      }
+      const peerProgress = computeWireProgress(wire, t.pieces?.length || 0);
 
       const peerItem = {
         ip: remoteIp,

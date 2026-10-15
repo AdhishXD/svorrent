@@ -1506,27 +1506,6 @@ a {
    Swarm Intelligence & Peer Geolocation Map
    --------------------------------------------------------------------------- */
 
-.swarm-page {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding-bottom: 32px;
-}
-
-.swarm-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.swarm-controls {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
 /* Scalable Segmented Control & Channel Filter Buttons */
 .segmented-control {
   display: inline-flex;

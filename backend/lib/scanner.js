@@ -36,17 +36,33 @@ export class FolderScanner {
     this.downloadDir = downloadDir;
     this.getClient = clientProvider;
     this.getArchive = archiveProvider;
+    this._cachedResult = null;
+    this._lastScanTime = 0;
+    this.CACHE_TTL_MS = 2500;
   }
 
-  scan() {
+  invalidateCache() {
+    this._cachedResult = null;
+    this._lastScanTime = 0;
+  }
+
+  scan(force = false) {
+    const now = Date.now();
+    if (!force && this._cachedResult && (now - this._lastScanTime) < this.CACHE_TTL_MS) {
+      return this._cachedResult;
+    }
+
     if (!fs.existsSync(this.downloadDir)) {
-      return {
+      const emptyResult = {
         downloadDir: this.downloadDir,
         items: [],
         totalSizeOnDisk: 0,
         orphanCount: 0,
         recoverableCount: 0,
       };
+      this._cachedResult = emptyResult;
+      this._lastScanTime = now;
+      return emptyResult;
     }
 
     const client = this.getClient();
@@ -187,13 +203,16 @@ export class FolderScanner {
       return b.mtime - a.mtime;
     });
 
-    return {
+    const result = {
       downloadDir: this.downloadDir,
       items,
       totalSizeOnDisk,
       orphanCount,
       recoverableCount,
     };
+    this._cachedResult = result;
+    this._lastScanTime = now;
+    return result;
   }
 
   deleteItem(name) {
@@ -203,6 +222,7 @@ export class FolderScanner {
     if (!fs.existsSync(target)) throw new Error('File not found on disk');
 
     fs.rmSync(target, { recursive: true, force: true });
+    this.invalidateCache();
     return { success: true, deleted: safeName };
   }
 }

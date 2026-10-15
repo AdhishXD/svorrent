@@ -48,7 +48,7 @@ Svorrent aggregates bandwidth across multiple active network connections by bind
 ![Network Bonding Interface](docs/screenshots/networks.webp)
 
 - Outgoing TCP and uTP peer connections are distributed across available network devices (`en0` Wi-Fi, `feth0` Android USB tether, `en1` Ethernet) to maximize aggregate throughput.
-- An autonomous background daemon (`scripts/tether-daemon.js`) polls for connected Android devices via `adb`, enables USB tethering mode automatically without passwords, acquires local DHCP addresses, and configures multi-path routing rules.
+- An autonomous native tethering daemon (`svorrent-tetherd`) polls for connected Android devices, enables USB tethering mode automatically without passwords, acquires local DHCP addresses, and configures multi-path routing rules.
 
 ---
 
@@ -58,6 +58,10 @@ Svorrent aggregates bandwidth across multiple active network connections by bind
 svorrent/
 ├── backend/
 │   ├── server.js                # Express REST API and WebTorrent orchestration
+│   ├── bin/                     # Native compiled daemons and shared libraries
+│   │   ├── svorrent-tetherd     # Native background tethering daemon
+│   │   └── tetherkit            # Android RNDIS/NCM interface utility
+│   ├── tether/                  # C++ tether daemon source (CDC-NCM / libusb)
 │   ├── lib/
 │   │   ├── networks.js          # Kernel-level multi-interface socket routing
 │   │   ├── playability.js       # Buffer-free streaming math and ffprobe extraction
@@ -66,7 +70,6 @@ svorrent/
 │   │   ├── trackers.js          # Dynamic public tracker fallback lists
 │   │   └── archive.js           # Torrent metadata storage
 │   └── scripts/
-│       ├── tether-daemon.js     # Autonomous Android USB tethering agent
 │       ├── install-tetherd.sh   # Launchd service installer for macOS
 │       └── uninstall-tetherd.sh # Service uninstaller
 └── frontend/
