@@ -268,6 +268,28 @@ a {
   color: var(--danger);
 }
 
+.icon-btn:disabled,
+.icon-btn.is-disabled {
+  opacity: 0.32;
+  cursor: not-allowed;
+  pointer-events: auto; /* Preserve hover for native title tooltip */
+}
+
+.icon-btn:disabled:hover,
+.icon-btn.is-disabled:hover {
+  background: transparent;
+  color: var(--text-2);
+}
+
+.icon-btn-play.is-playable {
+  color: #38bdf8;
+}
+
+.icon-btn-play.is-playable:hover {
+  background: var(--hover);
+  color: #7dd3fc;
+}
+
 .icon-btn.is-placeholder {
   pointer-events: none;
 }

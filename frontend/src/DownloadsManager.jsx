@@ -117,6 +117,15 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
     }
   };
 
+  const playMedia = async (t) => {
+    try {
+      const res = await apiPost(`/torrent/${encodeURIComponent(t.infoHash)}/play`);
+      notify(`Opening “${res.file || t.name}” in ${res.player || 'VLC'}…`);
+    } catch (err) {
+      notify(err.message || 'Could not open media player', 'error');
+    }
+  };
+
   const handleResumeMagnetSubmit = async (e) => {
     e.preventDefault();
     const uri = magnetInput.trim();
@@ -310,6 +319,17 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
                             >
                               <Icon name="magnet" />
                             </button>
+                            {t.playability?.isMedia && (
+                              <button
+                                className={`icon-btn icon-btn-play ${t.playability.canPlay ? 'is-playable' : 'is-disabled'}`}
+                                disabled={!t.playability.canPlay}
+                                onClick={() => playMedia(t)}
+                                title={t.playability.reason}
+                                aria-label={t.playability.reason}
+                              >
+                                <Icon name="play" />
+                              </button>
+                            )}
                             <button
                               className="icon-btn"
                               onClick={() => reveal(t.folderItemName || t.name)}
@@ -333,8 +353,8 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
                               <button
                                 className="icon-btn"
                                 onClick={() => togglePause(t)}
-                                title={t.paused ? 'Resume' : 'Pause'}
-                                aria-label={t.paused ? 'Resume' : 'Pause'}
+                                title={t.paused ? 'Resume download' : 'Pause download'}
+                                aria-label={t.paused ? 'Resume download' : 'Pause download'}
                               >
                                 <Icon name={t.paused ? 'play' : 'pause'} />
                               </button>
@@ -347,6 +367,17 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
                             >
                               <Icon name="refresh" />
                             </button>
+                            {t.playability?.isMedia && (
+                              <button
+                                className={`icon-btn icon-btn-play ${t.playability.canPlay ? 'is-playable' : 'is-disabled'}`}
+                                disabled={!t.playability.canPlay}
+                                onClick={() => playMedia(t)}
+                                title={t.playability.reason}
+                                aria-label={t.playability.reason}
+                              >
+                                <Icon name="play" />
+                              </button>
+                            )}
                             <button
                               className="icon-btn"
                               onClick={() => reveal(t.infoHash)}

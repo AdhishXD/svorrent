@@ -16,6 +16,13 @@ import { NetworkManager } from './lib/networks.js';
 import { TorrentArchive } from './lib/archive.js';
 import { FolderScanner } from './lib/scanner.js';
 import geoip from 'geoip-lite';
+import {
+  assessTorrentPlayability,
+  assessFolderItemPlayability,
+  findPrimaryVideoInTorrent,
+  findPrimaryVideoInFolder,
+  launchMediaPlayer,
+} from './lib/playability.js';
 
 function parseClientString(v) {
   if (!v) return 'Unknown';
@@ -293,6 +300,9 @@ function setupTorrentHooks(torrent) {
     torrent.strategy = 'sequential';
     if (torrent.pieces && torrent.pieces.length > 0) {
       torrent.select(0, torrent.pieces.length - 1);
+      if (typeof torrent.critical === 'function') {
+        torrent.critical(0, Math.min(20, torrent.pieces.length - 1));
+      }
     }
     if (torrent.wires) {
       torrent.wires.forEach((w) => {
@@ -449,6 +459,7 @@ app.get('/api/torrents', (req, res) => {
       : null;
 
     const isPaused = !!(t.paused || t._pausedManually);
+    const playability = assessTorrentPlayability(t, DOWNLOAD_DIR);
 
     return {
       infoHash: t.infoHash,
@@ -468,6 +479,7 @@ app.get('/api/torrents', (req, res) => {
       fileName: largestFile ? largestFile.name : null,
       filesCount: t.files ? t.files.length : 0,
       isFolderFile: false,
+      playability,
     };
   });
 
@@ -491,6 +503,8 @@ app.get('/api/torrents', (req, res) => {
         ? (item.recoverable.estimatedProgress / 100)
         : 1;
 
+      const playability = assessFolderItemPlayability(item);
+
       list.push({
         infoHash: id,
         magnet: isRecoverable ? item.recoverable.magnetURI : null,
@@ -513,6 +527,7 @@ app.get('/api/torrents', (req, res) => {
         folderItemName: item.name,
         recoverable: item.recoverable || null,
         mtime: item.mtime,
+        playability,
       });
     }
   } catch (e) {
@@ -869,6 +884,54 @@ app.post('/api/torrent/:id/open-finder', async (req, res) => {
     ? `explorer.exe "${basePath}"`
     : `xdg-open "${basePath}"`;
   exec(cmd, onOpen);
+});
+
+// 10. Play Video in VLC / Default Media Player
+app.post('/api/torrent/:id/play', async (req, res) => {
+  try {
+    const torrent = await client.get(req.params.id);
+    let targetPath = null;
+    let targetName = null;
+
+    if (torrent) {
+      const primary = findPrimaryVideoInTorrent(torrent, DOWNLOAD_DIR);
+      if (primary?.fullPath && fs.existsSync(primary.fullPath)) {
+        targetPath = primary.fullPath;
+        targetName = primary.name;
+      }
+    } else {
+      const folderInfo = folderScanner.scan();
+      const item = (folderInfo.items || []).find((it) => {
+        const isRec = it.status === 'recoverable';
+        const itId = isRec && it.recoverable?.infoHash
+          ? it.recoverable.infoHash
+          : `local-${Buffer.from(it.name).toString('hex')}`;
+        return itId === req.params.id || it.name === req.params.id;
+      });
+
+      if (item) {
+        const primary = findPrimaryVideoInFolder(item);
+        if (primary?.fullPath && fs.existsSync(primary.fullPath)) {
+          targetPath = primary.fullPath;
+          targetName = primary.name;
+        }
+      }
+    }
+
+    if (!targetPath) {
+      return res.status(404).json({ error: 'Playable media file not found on disk' });
+    }
+
+    launchMediaPlayer(targetPath, (err, player) => {
+      if (err) {
+        console.error('[server] Error launching media player:', err.message);
+        return res.status(500).json({ error: err.message });
+      }
+      res.json({ success: true, player, file: targetName, path: targetPath });
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ---------------------------------------------------------------------------
