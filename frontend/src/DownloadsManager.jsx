@@ -1,17 +1,20 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import { TorrentDetails } from './TorrentDetails';
 import { Icon } from './Icon';
-import { apiGet, apiPost, formatBytes, formatEta, formatSpeed, formatDate } from './lib';
+import { apiPost, formatBytes, formatEta, formatSpeed } from './lib';
 
 const FILTERS = [
   { key: 'all', label: 'All' },
   { key: 'active', label: 'Active' },
   { key: 'paused', label: 'Paused' },
   { key: 'completed', label: 'Completed' },
-  { key: 'folder', label: 'Local Files' },
 ];
 
 function statusOf(t) {
+  if (t.isFolderFile) {
+    if (t.isRecoverable) return { key: 'halfway', label: 'Halfway · In Folder' };
+    return { key: 'local', label: 'In Folder' };
+  }
   if (t.done) return { key: 'done', label: 'Completed' };
   if (t.paused) return { key: 'paused', label: 'Paused' };
   if (!t.ready) return { key: 'meta', label: 'Fetching metadata' };
@@ -22,45 +25,15 @@ function statusOf(t) {
 export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoSearch }) {
   const [filter, setFilter] = useState('all');
   const [detailsId, setDetailsId] = useState(null);
-  const [folderData, setFolderData] = useState({
-    downloadDir: '',
-    items: [],
-    totalSizeOnDisk: 0,
-    orphanCount: 0,
-    recoverableCount: 0,
-  });
-  const [loadingFolder, setLoadingFolder] = useState(false);
   const [resumeModalOpen, setResumeModalOpen] = useState(false);
   const [magnetInput, setMagnetInput] = useState('');
   const [resuming, setResuming] = useState(false);
-
-  // Scan local folder
-  const fetchFolderFiles = useCallback(async () => {
-    try {
-      setLoadingFolder(true);
-      const res = await apiGet('/folder-files');
-      if (res && Array.isArray(res.items)) {
-        setFolderData(res);
-      }
-    } catch {
-      // Ignored if offline
-    } finally {
-      setLoadingFolder(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchFolderFiles();
-    const id = setInterval(fetchFolderFiles, 3500);
-    return () => clearInterval(id);
-  }, [fetchFolderFiles]);
 
   const counts = {
     all: torrents.length,
     active: torrents.filter((t) => !t.done && !t.paused).length,
     paused: torrents.filter((t) => t.paused).length,
     completed: torrents.filter((t) => t.done).length,
-    folder: folderData.items.length,
   };
 
   const visible = torrents.filter((t) => {
@@ -71,6 +44,9 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
   });
 
   const togglePause = async (t) => {
+    if (t.isFolderFile && t.isRecoverable) {
+      return resumeRecoverable(t);
+    }
     setTorrents((prev) => prev.map((x) => (x.infoHash === t.infoHash ? { ...x, paused: !t.paused } : x)));
     try {
       await apiPost(`/torrent/${t.infoHash}/${t.paused ? 'resume' : 'pause'}`);
@@ -81,13 +57,26 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
   };
 
   const remove = async (t) => {
+    if (t.isFolderFile) {
+      if (!window.confirm(`Delete “${t.name}” from disk permanently?\n\nThis will remove the file from ~/Downloads/Svorrent.`)) return;
+      try {
+        await apiPost('/folder-files/delete', { name: t.folderItemName || t.name });
+        setTorrents((prev) => prev.filter((x) => x.infoHash !== t.infoHash));
+        notify(`Deleted “${t.name}” from disk`);
+        refresh();
+      } catch (err) {
+        notify(err.message || 'Failed to delete file', 'error');
+      }
+      return;
+    }
+
     if (!window.confirm(`Remove “${t.name}” from the list?\n\nFiles already on disk are kept.`)) return;
     try {
       await apiPost(`/torrent/${t.infoHash}/delete`, { deleteFiles: false });
       setTorrents((prev) => prev.filter((x) => x.infoHash !== t.infoHash));
       if (detailsId === t.infoHash) setDetailsId(null);
       notify(`Removed “${t.name}” (local files retained)`);
-      fetchFolderFiles();
+      refresh();
     } catch (err) {
       notify(err.message, 'error');
     }
@@ -101,7 +90,6 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
     }
   };
 
-  // Re-verify local files on disk for an active torrent
   const recheckTorrent = async (infoHash, name) => {
     notify(`Verifying local data for “${name || infoHash}”…`);
     try {
@@ -109,44 +97,24 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
       const pct = Math.round((res.progress || 0) * 100);
       notify(`Verified “${name || infoHash}”: ${pct}% complete on disk`);
       refresh();
-      fetchFolderFiles();
     } catch (err) {
       notify(err.message || 'Recheck failed', 'error');
     }
   };
 
-  // Resume an incomplete download that matches archived metadata
-  const resumeRecoverable = async (item) => {
-    const infoHash = item.recoverable?.infoHash;
-    if (!infoHash) return;
+  const resumeRecoverable = async (t) => {
+    const infoHash = t.recoverable?.infoHash || t.infoHash;
+    const magnet = t.magnet || t.recoverable?.magnetURI;
     try {
-      notify(`Resuming “${item.recoverable.name || item.name}” against existing files…`);
-      await apiPost('/folder-files/resume', { infoHash });
-      notify(`Resumed “${item.recoverable.name || item.name}”! Checking local pieces…`);
+      notify(`Resuming “${t.name}” against existing files…`);
+      await apiPost('/folder-files/resume', { infoHash, magnet });
+      notify(`Resumed “${t.name}”! Checking local pieces…`);
       refresh();
-      fetchFolderFiles();
-      setFilter('all');
     } catch (err) {
       notify(err.message || 'Failed to resume download', 'error');
     }
   };
 
-  // Resume all known recoverable downloads
-  const resumeAllRecoverable = async () => {
-    const recoverableItems = folderData.items.filter((i) => i.status === 'recoverable');
-    if (recoverableItems.length === 0) return;
-    notify(`Resuming ${recoverableItems.length} incomplete download(s)…`);
-    for (const item of recoverableItems) {
-      try {
-        await apiPost('/folder-files/resume', { infoHash: item.recoverable.infoHash });
-      } catch {}
-    }
-    notify(`Resumed ${recoverableItems.length} download(s)`);
-    refresh();
-    fetchFolderFiles();
-  };
-
-  // Resume via custom magnet link
   const handleResumeMagnetSubmit = async (e) => {
     e.preventDefault();
     const uri = magnetInput.trim();
@@ -158,25 +126,11 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
       setMagnetInput('');
       setResumeModalOpen(false);
       refresh();
-      fetchFolderFiles();
       setFilter('all');
     } catch (err) {
       notify(err.message || 'Could not resume with magnet', 'error');
     } finally {
       setResuming(false);
-    }
-  };
-
-  // Delete unwanted file/folder from downloads directory
-  const deleteLocalItem = async (item) => {
-    if (!window.confirm(`Permanently delete “${item.name}” from disk?\n\nThis will remove the file from ~/Downloads/Svorrent.`)) return;
-    try {
-      await apiPost('/folder-files/delete', { name: item.name });
-      notify(`Deleted “${item.name}” from disk`);
-      fetchFolderFiles();
-      refresh();
-    } catch (err) {
-      notify(err.message || 'Failed to delete file', 'error');
     }
   };
 
@@ -193,45 +147,24 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
           <button
             id="btn-resume-magnet"
             className="btn btn-outline"
-            onClick={() => setResumeModalOpen(true)}
+            onClick={() => {
+              setMagnetInput('');
+              setResumeModalOpen(true);
+            }}
             title="Resume a halfway download by pasting its magnet link or infohash"
           >
             <Icon name="magnet" size={14} /> Resume with Magnet
           </button>
-          <button id="open-downloads-folder" className="btn btn-outline" onClick={() => reveal('root')} title="Open ~/Downloads/Svorrent in Finder">
+          <button
+            id="open-downloads-folder"
+            className="btn btn-outline"
+            onClick={() => reveal('root')}
+            title="Open ~/Downloads/Svorrent in Finder"
+          >
             <Icon name="folder" size={14} /> Open folder
           </button>
         </div>
       </div>
-
-      {/* Incomplete / Orphan Downloads Alert Banner */}
-      {filter !== 'folder' && folderData.orphanCount > 0 && (
-        <div className="local-files-banner">
-          <div className="banner-icon">
-            <Icon name="info" size={16} />
-          </div>
-          <div className="banner-content">
-            <span className="banner-title">
-              Found {folderData.orphanCount} file{folderData.orphanCount !== 1 ? 's' : ''} ({formatBytes(folderData.totalSizeOnDisk)}) in your downloads folder not currently running in Svorrent.
-            </span>
-            <span className="banner-sub muted">
-              {folderData.recoverableCount > 0
-                ? `${folderData.recoverableCount} incomplete download(s) can be resumed halfway without starting from scratch.`
-                : 'Files may be partial downloads from a previous session.'}
-            </span>
-          </div>
-          <div className="banner-actions">
-            {folderData.recoverableCount > 0 && (
-              <button className="btn btn-sm btn-primary" onClick={resumeAllRecoverable}>
-                Resume {folderData.recoverableCount} Known
-              </button>
-            )}
-            <button className="btn btn-sm btn-outline" onClick={() => setFilter('folder')}>
-              Inspect Local Files
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Toolbar & Filter Tabs */}
       <div className="toolbar">
@@ -247,303 +180,205 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
             >
               {f.label}
               <span className="segment-count">{counts[f.key]}</span>
-              {f.key === 'folder' && folderData.orphanCount > 0 && (
-                <span className="segment-dot-orphan" title={`${folderData.orphanCount} untracked/halfway files on disk`} />
-              )}
             </button>
           ))}
         </div>
       </div>
 
-      {/* View 1: Local Folder Files View */}
-      {filter === 'folder' ? (
-        <div className="folder-files-view">
-          <div className="folder-meta-bar">
-            <div>
-              <span className="folder-meta-label">On-Disk Storage:</span>
-              <span className="mono folder-meta-value">{formatBytes(folderData.totalSizeOnDisk)}</span>
-              <span className="muted dot-sep" />
-              <span className="muted">{folderData.items.length} item{folderData.items.length !== 1 ? 's' : ''} on disk</span>
-              {folderData.orphanCount > 0 && (
-                <>
-                  <span className="muted dot-sep" />
-                  <span className="tag tag-warn-sm">{folderData.orphanCount} not in active downloads</span>
-                </>
-              )}
-            </div>
-            <button className="btn btn-sm btn-outline" onClick={fetchFolderFiles} disabled={loadingFolder} title="Rescan downloads folder">
-              <Icon name="refresh" size={13} /> {loadingFolder ? 'Scanning…' : 'Rescan Folder'}
-            </button>
-          </div>
-
-          {folderData.items.length === 0 ? (
-            <div className="empty-block">
-              <p>Your downloads folder is empty.</p>
+      {/* Downloads Table */}
+      {visible.length === 0 ? (
+        <div className="empty-block">
+          {torrents.length === 0 ? (
+            <>
+              <p>No downloads yet.</p>
               <button className="btn btn-outline" onClick={() => onGoSearch('')}>
                 Search for something
               </button>
-            </div>
+            </>
           ) : (
-            <div className="table-wrap">
-              <table className="table folder-table">
-                <thead>
-                  <tr>
-                    <th className="col-name">File / Folder Name</th>
-                    <th className="col-num">Size on Disk</th>
-                    <th>Status</th>
-                    <th className="col-num col-hide-sm">Last Modified</th>
-                    <th className="col-actions">
-                      <span className="sr-only">Actions</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {folderData.items.map((item) => {
-                    const isRecoverable = item.status === 'recoverable';
-                    const isActive = item.status === 'active';
-                    return (
-                      <tr key={item.path} className={`folder-row is-${item.status}`}>
-                        <td className="col-name">
-                          <div className="folder-item-name">
-                            <Icon name={item.isDirectory ? 'folder' : 'file'} size={15} className="folder-item-icon" />
-                            <span className="item-title" title={item.name}>
-                              {item.name}
-                            </span>
-                            {item.isDirectory && item.innerFileCount > 1 && (
-                              <span className="muted mono item-inner-count">({item.innerFileCount} files)</span>
-                            )}
-                          </div>
-                          {isRecoverable && item.recoverable && (
-                            <div className="recoverable-meta">
-                              <span className="mono">Known Torrent: {item.recoverable.name}</span>
-                              <span className="dot-sep" />
-                              <span className="mono">Total size: {formatBytes(item.recoverable.totalLength)} (~{item.recoverable.estimatedProgress}% complete)</span>
-                            </div>
-                          )}
-                          {isActive && item.torrent && (
-                            <div className="active-item-progress">
-                              <div className="bar bar-sm">
-                                <div className="bar-fill" style={{ width: `${Math.round((item.torrent.progress || 0) * 100)}%` }} />
-                              </div>
-                              <span className="mono muted text-xs">
-                                {Math.round((item.torrent.progress || 0) * 100)}% done · {item.torrent.paused ? 'Paused' : item.torrent.done ? 'Completed' : 'Downloading'}
-                              </span>
-                            </div>
-                          )}
-                        </td>
-                        <td className="col-num mono">{formatBytes(item.sizeOnDisk)}</td>
-                        <td>
-                          {isActive && (
-                            <span className="tag tag-status-active">
-                              ACTIVE TORRENT
-                            </span>
-                          )}
-                          {isRecoverable && (
-                            <span className="tag tag-status-recoverable" title="Matches metadata in torrent archive. Can be resumed halfway.">
-                              HALFWAY · RECOVERABLE
-                            </span>
-                          )}
-                          {!isActive && !isRecoverable && (
-                            <span className="tag tag-status-untracked" title="File on disk with no active torrent.">
-                              UNTRACKED FILE
-                            </span>
-                          )}
-                        </td>
-                        <td className="col-num mono muted col-hide-sm">
-                          {formatDate(item.mtime)}
-                        </td>
-                        <td className="col-actions">
-                          <div className="row-actions">
-                            {isRecoverable && (
-                              <button
-                                className="btn btn-sm btn-primary btn-action-resume"
-                                onClick={() => resumeRecoverable(item)}
-                                title="Continue download from where it was left"
-                              >
-                                <Icon name="play" size={12} /> Continue
-                              </button>
-                            )}
-                            {item.status === 'untracked' && (
-                              <>
-                                <button
-                                  className="icon-btn"
-                                  onClick={() => onGoSearch(item.name.replace(/\.[^/.]+$/, ''))}
-                                  title="Search swarm for matching torrent to continue"
-                                >
-                                  <Icon name="search" />
-                                </button>
-                                <button
-                                  className="icon-btn"
-                                  onClick={() => {
-                                    setMagnetInput('');
-                                    setResumeModalOpen(true);
-                                  }}
-                                  title="Resume by pasting magnet link"
-                                >
-                                  <Icon name="magnet" />
-                                </button>
-                              </>
-                            )}
-                            {isActive && item.torrent && (
-                              <>
-                                <button
-                                  className="icon-btn"
-                                  onClick={() => setDetailsId(item.torrent.infoHash)}
-                                  title="View details"
-                                >
-                                  <Icon name="info" />
-                                </button>
-                                <button
-                                  className="icon-btn"
-                                  onClick={() => recheckTorrent(item.torrent.infoHash, item.name)}
-                                  title="Force Recheck Local Data on disk"
-                                >
-                                  <Icon name="refresh" />
-                                </button>
-                              </>
-                            )}
-                            <button
-                              className="icon-btn"
-                              onClick={() => reveal(item.name)}
-                              title="Show in Finder"
-                            >
-                              <Icon name="folder" />
-                            </button>
-                            {!isActive && (
-                              <button
-                                className="icon-btn icon-btn-danger"
-                                onClick={() => deleteLocalItem(item)}
-                                title="Delete from disk"
-                              >
-                                <Icon name="trash" />
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            <p>Nothing in this view.</p>
           )}
         </div>
       ) : (
-        /* View 2: Active Torrents List */
-        visible.length === 0 ? (
-          <div className="empty-block">
-            {torrents.length === 0 ? (
-              <>
-                <p>No downloads yet.</p>
-                <button className="btn btn-outline" onClick={() => onGoSearch('')}>
-                  Search for something
-                </button>
-              </>
-            ) : (
-              <p>Nothing in this view.</p>
-            )}
-          </div>
-        ) : (
-          <div className="table-wrap">
-            <table className="table downloads-table">
-              <thead>
-                <tr>
-                  <th className="col-name">Name</th>
-                  <th className="col-num">Size</th>
-                  <th className="col-num col-hide-sm">Down</th>
-                  <th className="col-num col-hide-sm">Up</th>
-                  <th className="col-num col-hide-md">Peers</th>
-                  <th className="col-num">ETA</th>
-                  <th className="col-actions">
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {visible.map((t) => {
-                  const pct = Math.floor((t.progress || 0) * 1000) / 10;
-                  const status = statusOf(t);
-                  return (
-                    <tr key={t.infoHash} className={`dl-row is-${status.key}`}>
-                      <td className="col-name">
-                        <button className="dl-name" onClick={() => setDetailsId(t.infoHash)} title={t.name}>
+        <div className="table-wrap">
+          <table className="table downloads-table">
+            <thead>
+              <tr>
+                <th className="col-name">Name</th>
+                <th className="col-num">Size</th>
+                <th className="col-num col-hide-sm">Down</th>
+                <th className="col-num col-hide-sm">Up</th>
+                <th className="col-num col-hide-md">Peers</th>
+                <th className="col-num">ETA</th>
+                <th className="col-actions">
+                  <span className="sr-only">Actions</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map((t) => {
+                const pct = Math.floor((t.progress || 0) * 1000) / 10;
+                const status = statusOf(t);
+                const isFolder = !!t.isFolderFile;
+
+                return (
+                  <tr key={t.infoHash} className={`dl-row is-${status.key}`}>
+                    <td className="col-name">
+                      {isFolder ? (
+                        <div className="dl-name-wrapper">
+                          <span className="dl-name-static" title={t.name}>
+                            {t.name}
+                          </span>
+                          {t.isRecoverable ? (
+                            <span className="tag tag-recoverable-inline">HALFWAY</span>
+                          ) : (
+                            <span className="tag tag-folder-inline">IN FOLDER</span>
+                          )}
+                        </div>
+                      ) : (
+                        <button
+                          className="dl-name"
+                          onClick={() => setDetailsId(t.infoHash)}
+                          title={t.name}
+                        >
                           {t.name}
                         </button>
-                        <div className="dl-progress">
-                          <div className="bar">
-                            <div className="bar-fill" style={{ width: `${pct}%` }} />
-                          </div>
-                          <span className="dl-status">
-                            <span className="mono">{t.done ? '100%' : `${pct.toFixed(1)}%`}</span>
-                            <span className="dot-sep" />
-                            {status.label}
-                            {!t.done && t.length > 0 && (
-                              <>
-                                <span className="dot-sep" />
-                                <span className="mono">{formatBytes(t.downloaded)}</span>
-                              </>
-                            )}
-                          </span>
+                      )}
+
+                      <div className="dl-progress">
+                        <div className="bar">
+                          <div
+                            className={`bar-fill ${t.isRecoverable ? 'bar-fill-warn' : ''}`}
+                            style={{ width: `${pct}%` }}
+                          />
                         </div>
-                      </td>
-                      <td className="col-num mono">{t.length ? formatBytes(t.length) : '—'}</td>
-                      <td className="col-num mono col-hide-sm">{t.done ? '—' : formatSpeed(t.downloadSpeed)}</td>
-                      <td className="col-num mono col-hide-sm muted">{formatSpeed(t.uploadSpeed)}</td>
-                      <td className="col-num mono col-hide-md muted">{t.numPeers || 0}</td>
-                      <td className="col-num mono muted">{t.done || t.paused ? '—' : formatEta(t.timeRemaining)}</td>
-                      <td className="col-actions">
-                        <div className="row-actions">
-                          {!t.done && (
+                        <span className="dl-status">
+                          <span className="mono">{t.done ? '100%' : `${pct.toFixed(1)}%`}</span>
+                          <span className="dot-sep" />
+                          {status.label}
+                          {t.length > 0 && (
+                            <>
+                              <span className="dot-sep" />
+                              <span className="mono">{formatBytes(t.downloaded || t.length)}</span>
+                              {t.isRecoverable && t.length > t.downloaded && (
+                                <span className="muted mono"> of {formatBytes(t.length)}</span>
+                              )}
+                            </>
+                          )}
+                        </span>
+                      </div>
+                    </td>
+
+                    <td className="col-num mono">{t.length ? formatBytes(t.length) : '—'}</td>
+                    <td className="col-num mono col-hide-sm">
+                      {isFolder || t.done ? '—' : formatSpeed(t.downloadSpeed)}
+                    </td>
+                    <td className="col-num mono col-hide-sm muted">
+                      {isFolder ? '—' : formatSpeed(t.uploadSpeed)}
+                    </td>
+                    <td className="col-num mono col-hide-md muted">
+                      {isFolder ? '—' : (t.numPeers || 0)}
+                    </td>
+                    <td className="col-num mono muted">
+                      {isFolder || t.done || t.paused ? '—' : formatEta(t.timeRemaining)}
+                    </td>
+
+                    <td className="col-actions">
+                      <div className="row-actions">
+                        {isFolder ? (
+                          <>
+                            {t.isRecoverable && (
+                              <button
+                                className="icon-btn icon-btn-resume"
+                                onClick={() => resumeRecoverable(t)}
+                                title="Resume download halfway"
+                                aria-label="Resume download halfway"
+                              >
+                                <Icon name="play" />
+                              </button>
+                            )}
                             <button
                               className="icon-btn"
-                              onClick={() => togglePause(t)}
-                              title={t.paused ? 'Resume' : 'Pause'}
-                              aria-label={t.paused ? 'Resume' : 'Pause'}
+                              onClick={() => {
+                                setMagnetInput(t.magnet || '');
+                                setResumeModalOpen(true);
+                              }}
+                              title={t.isRecoverable ? 'Resume with custom magnet' : 'Seed / Resume via magnet link'}
+                              aria-label="Resume with magnet link"
                             >
-                              <Icon name={t.paused ? 'play' : 'pause'} />
+                              <Icon name="magnet" />
                             </button>
-                          )}
-                          <button
-                            className="icon-btn"
-                            onClick={() => recheckTorrent(t.infoHash, t.name)}
-                            title="Force Recheck / Verify local data on disk"
-                            aria-label="Force Recheck"
-                          >
-                            <Icon name="refresh" />
-                          </button>
-                          <button
-                            className="icon-btn"
-                            onClick={() => reveal(t.infoHash)}
-                            title="Show in Finder"
-                            aria-label="Show in Finder"
-                          >
-                            <Icon name="folder" />
-                          </button>
-                          <button
-                            className="icon-btn"
-                            onClick={() => setDetailsId(t.infoHash)}
-                            title="Details"
-                            aria-label="Details"
-                          >
-                            <Icon name="info" />
-                          </button>
-                          <button
-                            className="icon-btn icon-btn-danger"
-                            onClick={() => remove(t)}
-                            title="Remove"
-                            aria-label="Remove"
-                          >
-                            <Icon name="trash" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )
+                            <button
+                              className="icon-btn"
+                              onClick={() => reveal(t.folderItemName || t.name)}
+                              title="Show in Finder"
+                              aria-label="Show in Finder"
+                            >
+                              <Icon name="folder" />
+                            </button>
+                            <button
+                              className="icon-btn icon-btn-danger"
+                              onClick={() => remove(t)}
+                              title="Delete from disk"
+                              aria-label="Delete from disk"
+                            >
+                              <Icon name="trash" />
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            {!t.done && (
+                              <button
+                                className="icon-btn"
+                                onClick={() => togglePause(t)}
+                                title={t.paused ? 'Resume' : 'Pause'}
+                                aria-label={t.paused ? 'Resume' : 'Pause'}
+                              >
+                                <Icon name={t.paused ? 'play' : 'pause'} />
+                              </button>
+                            )}
+                            <button
+                              className="icon-btn"
+                              onClick={() => recheckTorrent(t.infoHash, t.name)}
+                              title="Force Recheck / Verify local data on disk"
+                              aria-label="Force Recheck"
+                            >
+                              <Icon name="refresh" />
+                            </button>
+                            <button
+                              className="icon-btn"
+                              onClick={() => reveal(t.infoHash)}
+                              title="Show in Finder"
+                              aria-label="Show in Finder"
+                            >
+                              <Icon name="folder" />
+                            </button>
+                            <button
+                              className="icon-btn"
+                              onClick={() => setDetailsId(t.infoHash)}
+                              title="Details"
+                              aria-label="Details"
+                            >
+                              <Icon name="info" />
+                            </button>
+                            <button
+                              className="icon-btn icon-btn-danger"
+                              onClick={() => remove(t)}
+                              title="Remove"
+                              aria-label="Remove"
+                            >
+                              <Icon name="trash" />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {/* Modal: Resume Download with Magnet or InfoHash */}

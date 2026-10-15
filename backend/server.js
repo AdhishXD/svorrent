@@ -375,9 +375,11 @@ app.post('/api/torrent/download', async (req, res) => {
   }
 });
 
-// 4. List all downloads
+// 4. List all downloads (active torrents + files directly in the downloads folder)
 app.get('/api/torrents', (req, res) => {
+  const activeHashes = new Set();
   const list = client.torrents.map((t) => {
+    activeHashes.add(t.infoHash);
     const largestFile = t.files && t.files.length > 0
       ? t.files.reduce((a, b) => (a.length > b.length ? a : b))
       : null;
@@ -401,8 +403,58 @@ app.get('/api/torrents', (req, res) => {
       timeRemaining: isPaused ? Infinity : (t.timeRemaining || 0),
       fileName: largestFile ? largestFile.name : null,
       filesCount: t.files ? t.files.length : 0,
+      isFolderFile: false,
     };
   });
+
+  // Directly include files present in the download folder if not already active
+  try {
+    const folderInfo = folderScanner.scan();
+    const orphanItems = (folderInfo.items || []).filter((item) => item.status !== 'active');
+
+    for (const item of orphanItems) {
+      const isRecoverable = item.status === 'recoverable';
+      const id = isRecoverable && item.recoverable?.infoHash
+        ? item.recoverable.infoHash
+        : `local-${Buffer.from(item.name).toString('hex')}`;
+
+      if (activeHashes.has(id)) continue;
+
+      const totalLen = isRecoverable && item.recoverable?.totalLength
+        ? item.recoverable.totalLength
+        : item.sizeOnDisk;
+      const progress = isRecoverable && item.recoverable
+        ? (item.recoverable.estimatedProgress / 100)
+        : 1;
+
+      list.push({
+        infoHash: id,
+        magnet: isRecoverable ? item.recoverable.magnetURI : null,
+        name: item.name,
+        ready: true,
+        paused: isRecoverable, // Incomplete items appear paused/ready-to-resume
+        done: !isRecoverable,  // Fully present items appear completed
+        progress,
+        downloadSpeed: 0,
+        uploadSpeed: 0,
+        numPeers: 0,
+        downloaded: item.sizeOnDisk,
+        length: totalLen,
+        path: item.absolutePath,
+        timeRemaining: 0,
+        fileName: item.name,
+        filesCount: item.innerFileCount || 1,
+        isFolderFile: true,
+        isRecoverable,
+        folderItemName: item.name,
+        recoverable: item.recoverable || null,
+        mtime: item.mtime,
+      });
+    }
+  } catch (e) {
+    console.warn('[server] Error scanning local folder for /api/torrents:', e.message);
+  }
+
   res.json(list);
 });
 
@@ -599,13 +651,23 @@ app.post('/api/torrent/:id/open-finder', async (req, res) => {
   const torrent = await client.get(req.params.id);
   ensureDownloadDir();
 
-  const configuredPath = torrent?.path ? torrent.path : DOWNLOAD_DIR;
-  const basePath = fs.existsSync(configuredPath) ? configuredPath : DOWNLOAD_DIR;
-  const largestFile = torrent?.files?.length
-    ? torrent.files.reduce((a, b) => (a.length > b.length ? a : b))
-    : null;
-  const candidateFile = largestFile?.path ? path.join(basePath, largestFile.path) : null;
-  const targetFile = candidateFile && fs.existsSync(candidateFile) ? candidateFile : null;
+  let targetFile = null;
+  let basePath = DOWNLOAD_DIR;
+
+  if (torrent) {
+    const configuredPath = torrent.path ? torrent.path : DOWNLOAD_DIR;
+    basePath = fs.existsSync(configuredPath) ? configuredPath : DOWNLOAD_DIR;
+    const largestFile = torrent.files?.length
+      ? torrent.files.reduce((a, b) => (a.length > b.length ? a : b))
+      : null;
+    const candidateFile = largestFile?.path ? path.join(basePath, largestFile.path) : null;
+    targetFile = candidateFile && fs.existsSync(candidateFile) ? candidateFile : null;
+  } else if (req.params.id && req.params.id !== 'root') {
+    const candidate = path.join(DOWNLOAD_DIR, req.params.id);
+    if (fs.existsSync(candidate)) {
+      targetFile = candidate;
+    }
+  }
 
   const onOpen = (err) => {
     if (err) return res.status(500).json({ error: err.message });
