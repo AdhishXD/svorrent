@@ -973,3 +973,398 @@ a {
     border-top: 1px solid var(--border);
   }
 }
+
+/* ---------- Networks & Infographics Page ---------- */
+
+.networks-page {
+  padding-bottom: 64px;
+}
+
+.network-kpi-grid {
+  grid-template-columns: repeat(4, 1fr) !important;
+  margin: 0 0 24px 0 !important;
+  background: var(--surface);
+}
+
+.network-kpi-grid > div {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.stat-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.stat-value {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.25;
+}
+
+.stat-unit {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-3);
+}
+
+.stat-meta {
+  font-size: 12px;
+  color: var(--text-2);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-indicator {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.status-indicator.online {
+  background: var(--ok);
+}
+
+.status-indicator.offline {
+  background: var(--text-3);
+}
+
+/* Infographics Layout */
+.infographics-panel {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 28px;
+}
+
+@media (max-width: 860px) {
+  .infographics-panel {
+    grid-template-columns: 1fr;
+  }
+  .network-kpi-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+}
+
+.infographic-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.infographic-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.infographic-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+
+.infographic-badge {
+  font-size: 11px;
+  color: var(--text-3);
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+
+/* Proportional Split Bar */
+.distribution-bar {
+  display: flex;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--surface-2);
+  gap: 2px;
+  margin-bottom: 14px;
+}
+
+.distribution-segment {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s ease, background-color 0.2s ease;
+  min-width: 2px;
+}
+
+.distribution-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+}
+
+.legend-item.is-disabled {
+  opacity: 0.45;
+}
+
+.legend-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.legend-name {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.legend-device {
+  font-size: 11px;
+}
+
+.legend-share {
+  margin-left: auto;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.legend-speed {
+  font-size: 12px;
+  min-width: 65px;
+  text-align: right;
+}
+
+/* Bandwidth Area Chart */
+.chart-box {
+  justify-content: space-between;
+}
+
+.bandwidth-chart-wrap {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.chart-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.chart-peak {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.bandwidth-chart-svg {
+  width: 100%;
+  height: 64px;
+  overflow: visible;
+  margin: auto 0;
+}
+
+.bandwidth-chart-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 72px;
+}
+
+.chart-footer {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 10.5px;
+}
+
+/* Adapters Table */
+.adapters-section {
+  margin-bottom: 28px;
+}
+
+.adapters-section .section-head {
+  margin-bottom: 12px;
+}
+
+.adapters-section .section-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 2px 0;
+  color: var(--text);
+}
+
+.adapters-section .section-sub {
+  font-size: 12.5px;
+}
+
+.adapters-table {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.adapters-table tr.row-disabled td {
+  opacity: 0.5;
+}
+
+.adapters-table .col-status {
+  width: 32px;
+  text-align: center;
+  padding-left: 14px;
+}
+
+.status-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.status-dot.is-offline {
+  background: var(--text-3) !important;
+}
+
+.iface-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.iface-name {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.iface-device {
+  font-size: 11px;
+}
+
+.tag-iface {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+
+.tag-sim {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(91, 141, 238, 0.12);
+  color: var(--accent);
+  border: 1px solid rgba(91, 141, 238, 0.25);
+}
+
+.speed-with-sparkline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.mini-sparkline {
+  overflow: visible;
+  flex-shrink: 0;
+}
+
+/* Minimal switch toggle (non-vibecoded macOS style) */
+.btn-toggle {
+  width: 32px;
+  height: 18px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  position: relative;
+  transition: background-color 0.15s, border-color 0.15s;
+  padding: 0;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.btn-toggle.is-active {
+  background: var(--text);
+  border-color: var(--text);
+}
+
+.toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  background: var(--text-3);
+  border-radius: 50%;
+  transition: transform 0.15s ease, background-color 0.15s ease;
+}
+
+.btn-toggle.is-active .toggle-thumb {
+  transform: translateX(14px);
+  background: #121314;
+}
+
+/* Simulation Button active state */
+.btn-sim-active {
+  background: rgba(91, 141, 238, 0.15);
+  border-color: rgba(91, 141, 238, 0.4);
+  color: var(--accent);
+}
+
+.btn-sim-active:hover {
+  background: rgba(91, 141, 238, 0.22);
+}
+
+/* Architecture Technical Note */
+.architecture-note {
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+.arch-icon {
+  color: var(--text-3);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.code-inline {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  background: var(--surface-2);
+  padding: 1px 4px;
+  border-radius: 3px;
+  color: var(--text);
+}
+

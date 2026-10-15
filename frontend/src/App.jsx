@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { SearchPage } from './SearchPage';
 import { DownloadsManager } from './DownloadsManager';
+import { NetworksPage } from './NetworksPage';
 import { Icon } from './Icon';
 import { apiGet, formatSpeed } from './lib';
 
-const routeFromPath = () => (window.location.pathname.startsWith('/downloads') ? 'downloads' : 'search');
+const routeFromPath = () => {
+  const p = window.location.pathname;
+  if (p.startsWith('/downloads')) return 'downloads';
+  if (p.startsWith('/networks')) return 'networks';
+  return 'search';
+};
 
 function App() {
   const [route, setRoute] = useState(routeFromPath);
@@ -36,12 +42,18 @@ function App() {
   }, []);
 
   useEffect(() => {
-    document.title = route === 'downloads' ? 'Downloads · Svorrent' : 'Svorrent';
+    document.title =
+      route === 'downloads'
+        ? 'Downloads · Svorrent'
+        : route === 'networks'
+        ? 'Networks · Svorrent'
+        : 'Svorrent';
   }, [route]);
 
   const navigate = (next) => {
     if (next === route) return;
-    window.history.pushState(null, '', next === 'downloads' ? '/downloads' : '/');
+    const path = next === 'downloads' ? '/downloads' : next === 'networks' ? '/networks' : '/';
+    window.history.pushState(null, '', path);
     setRoute(next);
   };
 
@@ -87,6 +99,13 @@ function App() {
               Downloads
               {downloads.length > 0 && <span className="tab-count">{downloads.length}</span>}
             </button>
+            <button
+              id="nav-networks"
+              className={`tab ${route === 'networks' ? 'is-active' : ''}`}
+              onClick={() => navigate('networks')}
+            >
+              Networks
+            </button>
           </nav>
 
           <div className="topbar-status">
@@ -121,6 +140,9 @@ function App() {
             notify={notify}
             onGoSearch={() => navigate('search')}
           />
+        )}
+        {route === 'networks' && (
+          <NetworksPage notify={notify} />
         )}
       </main>
 

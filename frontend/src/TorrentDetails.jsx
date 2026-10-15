@@ -180,6 +180,7 @@ function DetailsInner({ torrentId, onClose, onReveal }) {
                 <tr>
                   <th>Address</th>
                   <th>Client</th>
+                  <th>Adapter</th>
                   <th className="col-num">Down</th>
                   <th className="col-num">Up</th>
                   <th className="col-num">Has</th>
@@ -194,6 +195,7 @@ function DetailsInner({ torrentId, onClose, onReveal }) {
                       {p.type && <span className="muted"> · {String(p.type)}</span>}
                     </td>
                     <td className="ellipsis">{clientName(p.client)}</td>
+                    <td className="mono muted">{p.networkDevice || 'default'}</td>
                     <td className="col-num mono">{formatSpeed(p.downloadSpeed)}</td>
                     <td className="col-num mono muted">{formatSpeed(p.uploadSpeed)}</td>
                     <td className="col-num mono">{p.progress ?? 0}%</td>

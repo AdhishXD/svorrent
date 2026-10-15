@@ -12,6 +12,7 @@ import Wire from 'bittorrent-protocol';
 import peerid from 'bittorrent-peerid';
 import { createTrackerList } from './lib/trackers.js';
 import { createSession } from './lib/session.js';
+import { NetworkManager } from './lib/networks.js';
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -76,6 +77,8 @@ client.on('listening', () => {
 if (!Wire.nativeRC4) {
   console.warn('[engine] Native RC4 unavailable; start with `npm start` (--openssl-legacy-provider) for max speed.');
 }
+
+const networkManager = new NetworkManager(() => client);
 
 // ---------------------------------------------------------------------------
 // Session Persistence
@@ -400,6 +403,8 @@ app.get('/api/torrent/:id/nerd-stats', async (req, res) => {
       peerProgress = Math.round((piecesHave / torrent.pieces.length) * 100);
     }
 
+    const iface = networkManager.getWireInterface(wire);
+
     return {
       ip: wire.remoteAddress || '127.0.0.1',
       port: wire.remotePort || 0,
@@ -412,6 +417,8 @@ app.get('/api/torrent/:id/nerd-stats', async (req, res) => {
       choked: !!wire.peerChoking,
       interested: !!wire.peerInterested,
       progress: peerProgress,
+      networkInterface: iface ? iface.name : null,
+      networkDevice: iface ? iface.device : null,
     };
   });
 
@@ -580,6 +587,27 @@ app.post('/api/torrent/:id/open-finder', async (req, res) => {
     ? `explorer.exe "${basePath}"`
     : `xdg-open "${basePath}"`;
   exec(cmd, onOpen);
+});
+
+// ---------------------------------------------------------------------------
+// Network Aggregation & Multi-Interface Bonding (Inspired by Plexo)
+// ---------------------------------------------------------------------------
+
+app.get('/api/networks', (req, res) => {
+  res.json(networkManager.getSnapshot());
+});
+
+app.post('/api/networks/:id/toggle', (req, res) => {
+  const { id } = req.params;
+  const { enabled } = req.body;
+  networkManager.toggleInterface(id, !!enabled);
+  res.json({ success: true, ...networkManager.getSnapshot() });
+});
+
+app.post('/api/networks/simulate', (req, res) => {
+  const { enabled } = req.body;
+  networkManager.toggleSimulation(!!enabled);
+  res.json({ success: true, ...networkManager.getSnapshot() });
 });
 
 // ---------------------------------------------------------------------------

@@ -15,6 +15,10 @@ const paths = {
   external: <><path d="M9 2.5h4.5V7" /><path d="M13.5 2.5 7.5 8.5" /><path d="M11.5 9.5v3a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3" /></>,
   arrowDown: <path d="M8 3v10M4 9l4 4 4-4" />,
   arrowUp: <path d="M8 13V3M4 7l4-4 4 4" />,
+  network: <><rect x="2" y="2" width="4" height="4" rx="0.5" /><rect x="10" y="2" width="4" height="4" rx="0.5" /><rect x="6" y="10" width="4" height="4" rx="0.5" /><path d="M4 6v2.5h8V6M8 8.5V10" /></>,
+  wifi: <><path d="M2.5 5.5a8 8 0 0 1 11 0" /><path d="M5 8a4.5 4.5 0 0 1 6 0" /><circle cx="8" cy="11.5" r="0.75" fill="currentColor" /></>,
+  activity: <path d="M2 8.5h2.5l2-5 3 9 2-5.5h2.5" />,
+  refresh: <><path d="M2.5 8a5.5 5.5 0 0 1 9.3-3.9L13.5 6" /><path d="M13.5 2.5V6H10" /><path d="M13.5 8a5.5 5.5 0 0 1-9.3 3.9L2.5 10" /><path d="M2.5 13.5V10H6" /></>,
 };
 
 export function Icon({ name, size = 16, className = '' }) {
