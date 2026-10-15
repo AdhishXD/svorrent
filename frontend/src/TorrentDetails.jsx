@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Icon } from './Icon';
 import { apiGet, formatBytes, formatSpeed } from './lib';
+import { countryFlag, countryName } from './countryUtils';
 
 function clientName(client) {
   if (!client) return 'Unknown';
@@ -191,10 +192,13 @@ function DetailsInner({ torrentId, onClose, onReveal }) {
                 {peers.map((p, i) => (
                   <tr key={i}>
                     <td className="mono">
+                      <span className="table-flag" title={countryName(p.geo?.countryCode)} style={{ marginRight: '6px', fontSize: '13px' }}>
+                        {countryFlag(p.geo?.countryCode)}
+                      </span>
                       {String(p.ip)}:{String(p.port)}
                       {p.type && <span className="muted"> · {String(p.type)}</span>}
                     </td>
-                    <td className="ellipsis">{clientName(p.client)}</td>
+                    <td className="ellipsis" title={p.client}>{p.client || 'Unknown'}</td>
                     <td className="mono muted">{p.networkDevice || 'default'}</td>
                     <td className="col-num mono">{formatSpeed(p.downloadSpeed)}</td>
                     <td className="col-num mono muted">{formatSpeed(p.uploadSpeed)}</td>

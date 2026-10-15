@@ -16,6 +16,7 @@
     "bittorrent-peerid": "^2.0.2",
     "cors": "^2.8.6",
     "express": "^5.2.1",
+    "geoip-lite": "^2.0.3",
     "torrent-search-api": "^2.1.4",
     "webtorrent": "^3.0.21"
   }

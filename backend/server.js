@@ -15,6 +15,40 @@ import { createSession } from './lib/session.js';
 import { NetworkManager } from './lib/networks.js';
 import { TorrentArchive } from './lib/archive.js';
 import { FolderScanner } from './lib/scanner.js';
+import geoip from 'geoip-lite';
+
+function parseClientString(v) {
+  if (!v) return 'Unknown';
+  if (typeof v === 'string') return v.trim() || 'Unknown';
+  if (Buffer.isBuffer(v)) return v.toString('utf8').trim() || 'Unknown';
+  if (Array.isArray(v)) return Buffer.from(v).toString('utf8').trim() || 'Unknown';
+  if (typeof v === 'object') {
+    const vals = Object.values(v);
+    if (vals.length > 0 && vals.every((n) => typeof n === 'number')) {
+      return Buffer.from(vals).toString('utf8').trim() || 'Unknown';
+    }
+  }
+  return String(v).trim() || 'Unknown';
+}
+
+function getPeerGeo(remoteIp) {
+  if (!remoteIp || remoteIp === '127.0.0.1' || remoteIp.startsWith('10.') || remoteIp.startsWith('192.168.') || remoteIp.startsWith('172.16.')) {
+    return { country: 'unknown', countryCode: '??', city: '', region: '', ll: null };
+  }
+  try {
+    const lookup = geoip.lookup(remoteIp);
+    if (lookup) {
+      return {
+        country: lookup.country ? lookup.country.toLowerCase() : 'unknown',
+        countryCode: lookup.country || '??',
+        city: lookup.city || '',
+        region: lookup.region || '',
+        ll: lookup.ll || null,
+      };
+    }
+  } catch (e) {}
+  return { country: 'unknown', countryCode: '??', city: '', region: '', ll: null };
+}
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -496,18 +530,18 @@ app.get('/api/torrent/:id/nerd-stats', async (req, res) => {
   }
 
   const peers = (torrent.wires || []).map((wire) => {
-    let clientName = 'Unknown Client';
+    let rawClient = 'Unknown Client';
     if (wire.peerExtendedHandshake?.v) {
-      const v = wire.peerExtendedHandshake.v;
-      clientName = typeof v === 'string' ? v : Buffer.isBuffer(v) ? v.toString('utf8') : String(v);
+      rawClient = wire.peerExtendedHandshake.v;
     } else if (wire.peerId) {
       try {
         const parsed = peerid(wire.peerId);
         if (parsed?.client) {
-          clientName = `${parsed.client} ${parsed.version || ''}`.trim();
+          rawClient = `${parsed.client} ${parsed.version || ''}`.trim();
         }
       } catch (e) {}
     }
+    const clientName = parseClientString(rawClient);
 
     let peerProgress = 0;
     if (wire.peerPieces && torrent.pieces?.length > 0) {
@@ -519,11 +553,13 @@ app.get('/api/torrent/:id/nerd-stats', async (req, res) => {
     }
 
     const iface = networkManager.getWireInterface(wire);
+    const remoteIp = wire.remoteAddress || '127.0.0.1';
+    const geo = getPeerGeo(remoteIp);
 
     return {
-      ip: wire.remoteAddress || '127.0.0.1',
+      ip: remoteIp,
       port: wire.remotePort || 0,
-      client: String(clientName),
+      client: clientName,
       type: wire.type || 'tcp',
       downloadSpeed: typeof wire.downloadSpeed === 'function' ? wire.downloadSpeed() : 0,
       uploadSpeed: typeof wire.uploadSpeed === 'function' ? wire.uploadSpeed() : 0,
@@ -534,6 +570,7 @@ app.get('/api/torrent/:id/nerd-stats', async (req, res) => {
       progress: peerProgress,
       networkInterface: iface ? iface.name : null,
       networkDevice: iface ? iface.device : null,
+      geo,
     };
   });
 
@@ -608,6 +645,123 @@ app.get('/api/torrent/:id/nerd-stats', async (req, res) => {
     trackers: trackerList,
     dhtNodes,
     files,
+  });
+});
+
+// 5b. Swarm intelligence & peer geolocation map aggregation
+app.get('/api/swarm', (req, res) => {
+  const { id } = req.query;
+  let torrents = client.torrents || [];
+  if (id) {
+    torrents = torrents.filter((t) => t.infoHash === id.toLowerCase());
+  }
+
+  const allPeers = [];
+  const countryMap = new Map();
+  const interfaceMap = new Map();
+
+  for (const t of torrents) {
+    if (!t.wires) continue;
+    for (const wire of t.wires) {
+      const remoteIp = wire.remoteAddress || '127.0.0.1';
+      const geo = getPeerGeo(remoteIp);
+      const iface = networkManager.getWireInterface(wire);
+      const ifaceName = iface ? iface.name : 'Default';
+      const ifaceDevice = iface ? iface.device : 'en0';
+      const ifaceType = iface ? iface.type : 'wifi';
+
+      let rawClient = 'Unknown';
+      if (wire.peerExtendedHandshake?.v) {
+        rawClient = wire.peerExtendedHandshake.v;
+      } else if (wire.peerId) {
+        try {
+          const parsed = peerid(wire.peerId);
+          if (parsed?.client) {
+            rawClient = `${parsed.client} ${parsed.version || ''}`.trim();
+          }
+        } catch (e) {}
+      }
+      const clientStr = parseClientString(rawClient);
+
+      const downSpeed = typeof wire.downloadSpeed === 'function' ? wire.downloadSpeed() : 0;
+      const upSpeed = typeof wire.uploadSpeed === 'function' ? wire.uploadSpeed() : 0;
+
+      let peerProgress = 0;
+      if (wire.peerPieces && t.pieces?.length > 0) {
+        let have = 0;
+        for (let i = 0; i < t.pieces.length; i++) {
+          if (wire.peerPieces.get(i)) have++;
+        }
+        peerProgress = Math.round((have / t.pieces.length) * 100);
+      }
+
+      const peerItem = {
+        ip: remoteIp,
+        port: wire.remotePort || 0,
+        client: clientStr,
+        geo,
+        networkInterface: ifaceName,
+        networkDevice: ifaceDevice,
+        networkType: ifaceType,
+        downloadSpeed: downSpeed,
+        uploadSpeed: upSpeed,
+        downloaded: wire.downloaded || 0,
+        uploaded: wire.uploaded || 0,
+        progress: peerProgress,
+        choked: !!wire.peerChoking,
+        interested: !!wire.peerInterested,
+        torrentHash: t.infoHash,
+        torrentName: t.name || 'Unknown',
+      };
+
+      allPeers.push(peerItem);
+
+      // Aggregate country
+      const cCode = geo.countryCode;
+      if (cCode && cCode !== '??') {
+        if (!countryMap.has(cCode)) {
+          countryMap.set(cCode, {
+            code: cCode,
+            iso: geo.country,
+            city: geo.city,
+            count: 0,
+            downSpeed: 0,
+            upSpeed: 0,
+          });
+        }
+        const c = countryMap.get(cCode);
+        c.count++;
+        c.downSpeed += downSpeed;
+        c.upSpeed += upSpeed;
+      }
+
+      // Aggregate interface
+      if (!interfaceMap.has(ifaceDevice)) {
+        interfaceMap.set(ifaceDevice, {
+          device: ifaceDevice,
+          name: ifaceName,
+          type: ifaceType,
+          count: 0,
+          downSpeed: 0,
+        });
+      }
+      const im = interfaceMap.get(ifaceDevice);
+      im.count++;
+      im.downSpeed += downSpeed;
+    }
+  }
+
+  const countries = Array.from(countryMap.values()).sort((a, b) => b.count - a.count);
+  const interfaces = Array.from(interfaceMap.values());
+
+  res.json({
+    peers: allPeers,
+    summary: {
+      totalPeers: allPeers.length,
+      countriesCount: countries.length,
+      countries,
+      interfaces,
+    },
   });
 });
 
