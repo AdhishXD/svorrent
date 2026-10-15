@@ -19,6 +19,8 @@ const paths = {
   wifi: <><path d="M2.5 5.5a8 8 0 0 1 11 0" /><path d="M5 8a4.5 4.5 0 0 1 6 0" /><circle cx="8" cy="11.5" r="0.75" fill="currentColor" /></>,
   activity: <path d="M2 8.5h2.5l2-5 3 9 2-5.5h2.5" />,
   refresh: <><path d="M2.5 8a5.5 5.5 0 0 1 9.3-3.9L13.5 6" /><path d="M13.5 2.5V6H10" /><path d="M13.5 8a5.5 5.5 0 0 1-9.3 3.9L2.5 10" /><path d="M2.5 13.5V10H6" /></>,
+  globe: <><circle cx="8" cy="8" r="6" /><path d="M2 8h12M8 2a9 9 0 0 1 0 12M8 2a9 9 0 0 0 0 12" /></>,
+  map: <><polygon points="1 3.5 5.5 1.5 10.5 3.5 15 1.5 15 12.5 10.5 14.5 5.5 12.5 1 14.5" /><line x1="5.5" y1="1.5" x2="5.5" y2="12.5" /><line x1="10.5" y1="3.5" x2="10.5" y2="14.5" /></>,
 };
 
 export function Icon({ name, size = 16, className = '' }) {

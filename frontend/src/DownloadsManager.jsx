@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { TorrentDetails } from './TorrentDetails';
+import { SwarmModal } from './SwarmModal';
 import { Icon } from './Icon';
 import { apiPost, formatBytes, formatEta, formatSpeed } from './lib';
 
@@ -25,6 +26,7 @@ function statusOf(t) {
 export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoSearch }) {
   const [filter, setFilter] = useState('all');
   const [detailsId, setDetailsId] = useState(null);
+  const [swarmTorrent, setSwarmTorrent] = useState(null);
   const [resumeModalOpen, setResumeModalOpen] = useState(false);
   const [magnetInput, setMagnetInput] = useState('');
   const [resuming, setResuming] = useState(false);
@@ -355,6 +357,14 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
                             </button>
                             <button
                               className="icon-btn"
+                              onClick={() => setSwarmTorrent(t)}
+                              title="Swarm Topology & Peer Map"
+                              aria-label="Swarm Map"
+                            >
+                              <Icon name="globe" />
+                            </button>
+                            <button
+                              className="icon-btn"
                               onClick={() => setDetailsId(t.infoHash)}
                               title="Details"
                               aria-label="Details"
@@ -425,6 +435,15 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
           torrentId={detailsId}
           onClose={() => setDetailsId(null)}
           onReveal={() => reveal(detailsId)}
+        />
+      )}
+
+      {/* Swarm Topology & Peer Map Modal */}
+      {swarmTorrent && (
+        <SwarmModal
+          torrent={swarmTorrent}
+          onClose={() => setSwarmTorrent(null)}
+          notify={notify}
         />
       )}
     </section>

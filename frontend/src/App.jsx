@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { SearchPage } from './SearchPage';
 import { DownloadsManager } from './DownloadsManager';
-import { SwarmPage } from './SwarmPage';
 import { NetworksPage } from './NetworksPage';
 import { Icon } from './Icon';
 import { apiGet, formatSpeed } from './lib';
@@ -9,7 +8,6 @@ import { apiGet, formatSpeed } from './lib';
 const routeFromPath = () => {
   const p = window.location.pathname;
   if (p.startsWith('/downloads')) return 'downloads';
-  if (p.startsWith('/swarm')) return 'swarm';
   if (p.startsWith('/networks')) return 'networks';
   return 'search';
 };
@@ -47,8 +45,6 @@ function App() {
     document.title =
       route === 'downloads'
         ? 'Downloads · Svorrent'
-        : route === 'swarm'
-        ? 'Swarm Map · Svorrent'
         : route === 'networks'
         ? 'Networks · Svorrent'
         : 'Svorrent';
@@ -56,7 +52,7 @@ function App() {
 
   const navigate = (next) => {
     if (next === route) return;
-    const path = next === 'downloads' ? '/downloads' : next === 'swarm' ? '/swarm' : next === 'networks' ? '/networks' : '/';
+    const path = next === 'downloads' ? '/downloads' : next === 'networks' ? '/networks' : '/';
     window.history.pushState(null, '', path);
     setRoute(next);
   };
@@ -71,7 +67,6 @@ function App() {
   const active = downloads.filter((t) => !t.done && !t.paused).length;
   const down = downloads.reduce((sum, t) => sum + (t.downloadSpeed || 0), 0);
   const up = downloads.reduce((sum, t) => sum + (t.uploadSpeed || 0), 0);
-  const totalPeers = downloads.reduce((sum, t) => sum + (t.numPeers || 0), 0);
 
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -110,14 +105,6 @@ function App() {
             >
               Downloads
               {downloads.length > 0 && <span className="tab-count">{downloads.length}</span>}
-            </button>
-            <button
-              id="nav-swarm"
-              className={`tab ${route === 'swarm' ? 'is-active' : ''}`}
-              onClick={() => navigate('swarm')}
-            >
-              Swarm
-              {totalPeers > 0 && <span className="tab-count">{totalPeers}</span>}
             </button>
             <button
               id="nav-networks"
@@ -160,9 +147,6 @@ function App() {
             notify={notify}
             onGoSearch={handleGoSearch}
           />
-        )}
-        {route === 'swarm' && (
-          <SwarmPage notify={notify} />
         )}
         {route === 'networks' && (
           <NetworksPage notify={notify} />
