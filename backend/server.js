@@ -104,9 +104,18 @@ const saveSession = () => {
   }
 };
 
+let saveSessionTimer = null;
+const scheduleSaveSession = (delay = 2000) => {
+  if (saveSessionTimer) return;
+  saveSessionTimer = setTimeout(() => {
+    saveSessionTimer = null;
+    saveSession();
+  }, delay);
+};
+
 setInterval(() => {
   saveSession();
-}, 20 * 1000).unref();
+}, 5 * 1000).unref();
 
 async function restoreSession() {
   let entries = session.load();
@@ -244,8 +253,8 @@ function setupTorrentHooks(torrent) {
   });
 
   torrent.once('ready', () => {
-    // Swarm Rarest-First Strategy: maximum peer reciprocation and throughput
-    torrent.strategy = 'rarest';
+    // Sequential Strategy: commits pieces to disk and bitfield in order so restarts/failures resume seamlessly
+    torrent.strategy = 'sequential';
     if (torrent.pieces && torrent.pieces.length > 0) {
       torrent.select(0, torrent.pieces.length - 1);
     }
@@ -259,6 +268,10 @@ function setupTorrentHooks(torrent) {
     }
     archive.save(torrent);
     saveSession();
+  });
+
+  torrent.on('verified', () => {
+    scheduleSaveSession();
   });
 
   torrent.on('done', () => {

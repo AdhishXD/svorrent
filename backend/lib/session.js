@@ -33,7 +33,9 @@ export function createSession(dataDir) {
         paused: !!t._pausedManually,
         addedAt: t._addedAt || Date.now(),
         torrentFile: t.torrentFile ? Buffer.from(t.torrentFile).toString('base64') : null,
-        bitfield: t.ready && t.bitfield ? Buffer.from(t.bitfield.buffer).toString('base64') : null,
+        bitfield: t.ready && t.bitfield
+          ? Buffer.from(t.bitfield.buffer.buffer, t.bitfield.buffer.byteOffset, t.bitfield.buffer.byteLength).toString('base64')
+          : null,
       }));
 
     // Write atomically so a crash mid-write never corrupts the session.
