@@ -22,6 +22,13 @@ if launchctl print "system/${LABEL}" >/dev/null 2>&1; then
   launchctl bootout "system/${LABEL}" 2>/dev/null || true
 fi
 
+# Also unload legacy TetherKit helper if present to prevent USB device claim conflicts
+if launchctl print "system/com.tetherkit.helper" >/dev/null 2>&1; then
+  echo "[*] Unloading com.tetherkit.helper..."
+  launchctl bootout "system/com.tetherkit.helper" 2>/dev/null || true
+  pkill -9 com.tetherkit.helper 2>/dev/null || true
+fi
+
 # Ensure /Library/PrivilegedHelperTools exists
 mkdir -p "${TOOLS_DIR}"
 
@@ -31,9 +38,13 @@ cp -a "${BIN_DIR}/svorrent-tetherd" "${TOOLS_DIR}/svorrent-tetherd"
 cp -a "${BIN_DIR}"/libtetherkit*.dylib "${TOOLS_DIR}/"
 cp -a "${BIN_DIR}"/libusb-*.dylib "${TOOLS_DIR}/"
 
-chown root:wheel "${TOOLS_DIR}/svorrent-tetherd"
+chown -R root:wheel "${TOOLS_DIR}/svorrent-tetherd" "${TOOLS_DIR}"/libtetherkit*.dylib "${TOOLS_DIR}"/libusb-*.dylib
 chmod 755 "${TOOLS_DIR}/svorrent-tetherd"
 find "${TOOLS_DIR}" -maxdepth 1 -name '*.dylib' -type f -exec chmod 444 {} +
+
+# Sign with ad-hoc signature to satisfy Darwin kernel codesign requirements
+codesign --force --sign - "${TOOLS_DIR}/svorrent-tetherd" || true
+find "${TOOLS_DIR}" -maxdepth 1 -name '*.dylib' -type f -exec codesign --force --sign - {} + || true
 
 # Copy and set up plist
 echo "[*] Installing LaunchDaemon to ${PLIST_DEST}..."

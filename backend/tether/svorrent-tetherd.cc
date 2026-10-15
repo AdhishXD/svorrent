@@ -14,6 +14,9 @@ static void handle_signal(int sig) {
 }
 
 int main(int argc, char** argv) {
+    setlinebuf(stdout);
+    setlinebuf(stderr);
+
     bool once_mode = false;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--once") == 0) {

@@ -96,9 +96,14 @@ export class NetworkManager {
       const { stdout } = await execAsync(`"${TETHER_BIN}" --list`);
       if (stdout.includes('RNDIS devices found:')) {
         let deviceName = 'Android Device';
-        if (stdout.includes('04e8:')) {
-          deviceName = 'Samsung Galaxy S23';
-        }
+        if (stdout.includes('04e8:')) deviceName = 'Samsung Galaxy';
+        else if (stdout.includes('18d1:')) deviceName = 'Google Pixel';
+        else if (stdout.includes('2717:')) deviceName = 'Xiaomi / Redmi';
+        else if (stdout.includes('2a70:')) deviceName = 'OnePlus';
+        else if (stdout.includes('22b8:')) deviceName = 'Motorola';
+        else if (stdout.includes('0fce:')) deviceName = 'Sony Xperia';
+        else if (stdout.includes('12d1:')) deviceName = 'Huawei / Honor';
+
         this.usbTetherDevice = {
           found: true,
           name: deviceName,
@@ -175,7 +180,8 @@ export class NetworkManager {
           let humanName = this.hardwarePorts.get(device);
           if (!humanName) {
             if (device.startsWith('feth')) {
-              humanName = 'Android USB Tethering (Galaxy S23)';
+              const devName = this.usbTetherDevice?.name || 'Android Device';
+              humanName = `Android USB Tethering (${devName})`;
             } else if (device.startsWith('en')) {
               humanName = `Interface (${device})`;
             } else {
