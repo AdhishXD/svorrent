@@ -1,330 +1,209 @@
-import React, { useState, useEffect } from 'react';
-import { NerdModal } from './NerdModal';
+import { useState } from 'react';
+import { TorrentDetails } from './TorrentDetails';
+import { Icon } from './Icon';
+import { apiPost, formatBytes, formatEta, formatSpeed } from './lib';
 
-function formatBytes(bytes) {
-  if (!bytes || bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+const FILTERS = [
+  { key: 'all', label: 'All' },
+  { key: 'active', label: 'Active' },
+  { key: 'paused', label: 'Paused' },
+  { key: 'completed', label: 'Completed' },
+];
+
+function statusOf(t) {
+  if (t.done) return { key: 'done', label: 'Completed' };
+  if (t.paused) return { key: 'paused', label: 'Paused' };
+  if (!t.ready) return { key: 'meta', label: 'Fetching metadata' };
+  if (!t.numPeers) return { key: 'stalled', label: 'Looking for peers' };
+  return { key: 'active', label: 'Downloading' };
 }
 
-function formatTime(ms) {
-  if (!ms || ms === Infinity || isNaN(ms)) return '∞';
-  const totalSeconds = Math.floor(ms / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  if (minutes > 0) return `${minutes}m ${seconds}s`;
-  return `${seconds}s`;
-}
+export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoSearch }) {
+  const [filter, setFilter] = useState('all');
+  const [detailsId, setDetailsId] = useState(null);
 
-export function DownloadsManager() {
-  const [torrents, setTorrents] = useState([]);
-  const [filter, setFilter] = useState('all'); // 'all' | 'downloading' | 'completed' | 'paused' | 'streams'
-  const [nerdModalTorrentId, setNerdModalTorrentId] = useState(null);
-  const [actionFeedback, setActionFeedback] = useState('');
-
-  const fetchTorrents = async () => {
-    try {
-      const res = await fetch('http://localhost:3001/api/torrents');
-      if (res.ok) {
-        const list = await res.json();
-        setTorrents(list);
-      }
-    } catch (e) {}
+  const counts = {
+    all: torrents.length,
+    active: torrents.filter((t) => !t.done && !t.paused).length,
+    paused: torrents.filter((t) => t.paused).length,
+    completed: torrents.filter((t) => t.done).length,
   };
 
-  useEffect(() => {
-    fetchTorrents();
-    const interval = setInterval(fetchTorrents, 1200);
-    return () => clearInterval(interval);
-  }, []);
-
-  const handlePauseResume = async (infoHash, isPaused) => {
-    const endpoint = isPaused ? 'resume' : 'pause';
-    // Optimistic UI update
-    setTorrents((prev) =>
-      prev.map((t) => (t.infoHash === infoHash ? { ...t, paused: !isPaused } : t))
-    );
-    try {
-      await fetch(`http://localhost:3001/api/torrent/${infoHash}/${endpoint}`, { method: 'POST' });
-      fetchTorrents();
-    } catch (e) {}
-  };
-
-  const handleDelete = async (infoHash) => {
-    if (confirm('Stop and remove this download from Svorrent?')) {
-      await fetch(`http://localhost:3001/api/torrent/${infoHash}/delete`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deleteFiles: false }),
-      });
-      setTorrents((prev) => prev.filter((t) => t.infoHash !== infoHash));
-      if (nerdModalTorrentId === infoHash) setNerdModalTorrentId(null);
-    }
-  };
-
-  const handleOpenFinder = async (infoHash) => {
-    try {
-      const res = await fetch(`http://localhost:3001/api/torrent/${infoHash}/open-finder`, { method: 'POST' });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'Could not open download location');
-      setActionFeedback(data.path ? `Opened: ${data.path}` : 'Opened download location');
-    } catch (err) {
-      setActionFeedback(err.message);
-    }
-    setTimeout(() => setActionFeedback(''), 2500);
-  };
-
-  const handlePlayNative = async (infoHash) => {
-    await fetch(`http://localhost:3001/api/torrent/${infoHash}/play-native`, { method: 'POST' });
-    setActionFeedback('Launched in desktop player');
-    setTimeout(() => setActionFeedback(''), 2500);
-  };
-
-  // DownloadsManager displays real user downloads exclusively
-  const permanentDownloads = torrents.filter((t) => t.isPermanentDownload || !t.isStreamOnly);
-  const filteredTorrents = permanentDownloads.filter((t) => {
-    if (filter === 'downloading') return !t.done && !t.paused;
-    if (filter === 'completed') return t.done;
+  const visible = torrents.filter((t) => {
+    if (filter === 'active') return !t.done && !t.paused;
     if (filter === 'paused') return t.paused;
+    if (filter === 'completed') return t.done;
     return true;
   });
 
-  const totalDownSpeed = torrents.reduce((acc, t) => acc + (t.downloadSpeed || 0), 0);
-  const totalUpSpeed = torrents.reduce((acc, t) => acc + (t.uploadSpeed || 0), 0);
-  const activeCount = torrents.filter((t) => !t.done && !t.paused).length;
-  const completedCount = torrents.filter((t) => t.done).length;
-  const pausedCount = torrents.filter((t) => t.paused).length;
+  const togglePause = async (t) => {
+    setTorrents((prev) => prev.map((x) => (x.infoHash === t.infoHash ? { ...x, paused: !t.paused } : x)));
+    try {
+      await apiPost(`/torrent/${t.infoHash}/${t.paused ? 'resume' : 'pause'}`);
+    } catch (err) {
+      notify(err.message, 'error');
+    }
+    refresh();
+  };
+
+  const remove = async (t) => {
+    if (!window.confirm(`Remove “${t.name}” from the list?\n\nFiles already on disk are kept.`)) return;
+    try {
+      await apiPost(`/torrent/${t.infoHash}/delete`, { deleteFiles: false });
+      setTorrents((prev) => prev.filter((x) => x.infoHash !== t.infoHash));
+      if (detailsId === t.infoHash) setDetailsId(null);
+    } catch (err) {
+      notify(err.message, 'error');
+    }
+  };
+
+  const reveal = async (id) => {
+    try {
+      await apiPost(`/torrent/${id}/open-finder`);
+    } catch (err) {
+      notify(err.message || 'Could not open folder', 'error');
+    }
+  };
+
+  const openInPlayer = async (t) => {
+    try {
+      const data = await apiPost(`/torrent/${t.infoHash}/play-native`);
+      notify(data.player ? `Opened in ${data.player}` : 'Opened in default player');
+    } catch (err) {
+      notify(err.message || 'Could not open file', 'error');
+    }
+  };
 
   return (
-    <div className="downloads-page-container">
-      {/* Top Header */}
-      <header className="downloads-page-header">
-        <div className="header-left">
-          <a href="/" className="cinema-back-link" title="Return to Svorrent Search">
-            ← Svorrent Search
-          </a>
-          <div className="downloads-title-group">
-            <h1>⬇ Downloads Manager</h1>
-            <span className="downloads-path-hint">
-              📁 Saved to <strong>~/Downloads/Svorrent</strong>
-            </span>
-          </div>
+    <section className="downloads-page">
+      <div className="page-head">
+        <div>
+          <h1 className="page-title">Downloads</h1>
+          <p className="page-sub">
+            Saved to <span className="mono">~/Downloads/Svorrent</span>
+          </p>
         </div>
+        <button id="open-downloads-folder" className="btn btn-outline" onClick={() => reveal('root')}>
+          <Icon name="folder" size={14} /> Open folder
+        </button>
+      </div>
 
-        <div className="header-right">
-          {actionFeedback && <span className="action-feedback">{actionFeedback}</span>}
-
-          <div className="global-stats-pill">
-            <span className="stat-pill-item">
-              <span className="pill-dot">●</span> <strong>{activeCount}</strong> active
-            </span>
-            <span className="stat-pill-item speed-down">
-              ⚡ <strong>{formatBytes(totalDownSpeed)}/s</strong>
-            </span>
-            {totalUpSpeed > 0 && (
-              <span className="stat-pill-item speed-up">
-                ▲ <strong>{formatBytes(totalUpSpeed)}/s</strong>
-              </span>
-            )}
-          </div>
-
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={() => handleOpenFinder(permanentDownloads[0]?.infoHash || '')}
-            title="Open ~/Downloads/Svorrent in Finder / Explorer"
-          >
-            📂 Open Downloads Folder
-          </button>
+      <div className="toolbar">
+        <div className="segmented" role="tablist" aria-label="Filter downloads">
+          {FILTERS.map((f) => (
+            <button
+              key={f.key}
+              id={`filter-${f.key}`}
+              role="tab"
+              aria-selected={filter === f.key}
+              className={`segment ${filter === f.key ? 'is-active' : ''}`}
+              onClick={() => setFilter(f.key)}
+            >
+              {f.label}
+              <span className="segment-count">{counts[f.key]}</span>
+            </button>
+          ))}
         </div>
-      </header>
+      </div>
 
-      {/* Filter Tabs Bar */}
-      <nav className="downloads-filter-bar">
-        <div className="filter-tab-group">
-          <button
-            className={`filter-btn ${filter === 'all' ? 'active' : ''}`}
-            onClick={() => setFilter('all')}
-          >
-            All Downloads ({permanentDownloads.length})
-          </button>
-
-          <button
-            className={`filter-btn ${filter === 'downloading' ? 'active' : ''}`}
-            onClick={() => setFilter('downloading')}
-          >
-            Downloading ({activeCount})
-          </button>
-
-          <button
-            className={`filter-btn ${filter === 'completed' ? 'active' : ''}`}
-            onClick={() => setFilter('completed')}
-          >
-            Completed ({completedCount})
-          </button>
-
-          <button
-            className={`filter-btn ${filter === 'paused' ? 'active' : ''}`}
-            onClick={() => setFilter('paused')}
-          >
-            Paused ({pausedCount})
-          </button>
+      {visible.length === 0 ? (
+        <div className="empty-block">
+          {torrents.length === 0 ? (
+            <>
+              <p>No downloads yet.</p>
+              <button className="btn btn-outline" onClick={onGoSearch}>
+                Search for something
+              </button>
+            </>
+          ) : (
+            <p>Nothing in this view.</p>
+          )}
         </div>
-      </nav>
-
-      {/* Main Downloads List */}
-      <main className="downloads-content">
-        {filteredTorrents.length === 0 ? (
-          <div className="empty-downloads-card">
-            <div className="empty-icon">⬇</div>
-            <h3>No Downloads in this category</h3>
-            <p>
-              {filter === 'completed'
-                ? 'No completed torrents yet.'
-                : filter === 'paused'
-                ? 'No torrents are currently paused.'
-                : 'Search for high-quality torrents or Remuxes and click ⬇ Download to save them locally.'}
-            </p>
-            <a href="/" className="btn btn-primary" style={{ textDecoration: 'none', display: 'inline-block' }}>
-              🔍 Search Svorrent
-            </a>
-          </div>
-        ) : (
-          <div className="downloads-cards-grid">
-            {filteredTorrents.map((t) => {
-              const pct = Math.round((t.progress || 0) * 100);
-              const isPaused = t.paused;
-              const isDone = t.done;
-
-              return (
-                <div key={t.infoHash} className={`download-card ${isDone ? 'done' : isPaused ? 'paused' : 'active'}`}>
-                  <div className="card-top-row">
-                    <div className="card-title-box">
-                      <div className="card-badges">
-                        <span className={`status-tag ${isDone ? 'tag-done' : isPaused ? 'tag-paused' : 'tag-active'}`}>
-                          {isDone ? '✓ Completed' : isPaused ? '⏸ Paused' : '⚡ Downloading'}
-                        </span>
-                        <span className="size-tag">{formatBytes(t.length)}</span>
-                      </div>
-                      <h3 className="download-name" title={t.name}>
+      ) : (
+        <div className="table-wrap">
+          <table className="table downloads-table">
+            <thead>
+              <tr>
+                <th className="col-name">Name</th>
+                <th className="col-num">Size</th>
+                <th className="col-num col-hide-sm">Down</th>
+                <th className="col-num col-hide-sm">Up</th>
+                <th className="col-num col-hide-md">Peers</th>
+                <th className="col-num">ETA</th>
+                <th className="col-actions">
+                  <span className="sr-only">Actions</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map((t) => {
+                const pct = Math.floor((t.progress || 0) * 1000) / 10;
+                const status = statusOf(t);
+                return (
+                  <tr key={t.infoHash} className={`dl-row is-${status.key}`}>
+                    <td className="col-name">
+                      <button className="dl-name" onClick={() => setDetailsId(t.infoHash)} title={t.name}>
                         {t.name}
-                      </h3>
-                    </div>
-
-                    <div className="card-actions">
-                      <button
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => {
-                          const playerUrl = `/player?magnet=${encodeURIComponent(t.magnet)}&title=${encodeURIComponent(t.name)}`;
-                          window.open(playerUrl, '_blank');
-                        }}
-                        title="Stream in dedicated Cinema theater tab"
-                      >
-                        ⚡ Stream in Cinema
                       </button>
-
-                      <button
-                        className="btn btn-nerd btn-sm"
-                        onClick={() => setNerdModalTorrentId(t.infoHash)}
-                        title="Inspect wire packets, peers, piece map, and trackers"
-                      >
-                        🔍 Nerd Info
-                      </button>
-
-                      <button
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => handleOpenFinder(t.infoHash)}
-                        title="Reveal file in Finder / Explorer"
-                      >
-                        📂 Finder
-                      </button>
-
-                      <button
-                        className="btn btn-primary btn-sm"
-                        onClick={() => handlePlayNative(t.infoHash)}
-                        title="Open in native desktop player (IINA / VLC) with full HDR & TrueHD passthrough"
-                      >
-                        ▶ Open
-                      </button>
-
-                      <button
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => handlePauseResume(t.infoHash, t.paused)}
-                        title={isPaused ? 'Resume downloading' : 'Pause downloading'}
-                      >
-                        {isPaused ? '▶ Resume' : '⏸ Pause'}
-                      </button>
-
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => handleDelete(t.infoHash)}
-                        title="Remove torrent"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Progress bar */}
-                  <div className="card-progress-section">
-                    <div className="progress-bar-bg">
-                      <div
-                        className={`progress-bar-fill ${isDone ? 'fill-done' : isPaused ? 'fill-paused' : ''}`}
-                        style={{ width: `${Math.max(pct, 2)}%` }}
-                      ></div>
-                    </div>
-                  </div>
-
-                  {/* Metrics bar */}
-                  <div className="card-metrics-row">
-                    <div className="metric-item">
-                      <span className="metric-label">Downloaded:</span>
-                      <span className="metric-val">{formatBytes(t.downloaded)} of {formatBytes(t.length)} ({pct}%)</span>
-                    </div>
-
-                    {!isDone && (
-                      <div className="metric-item">
-                        <span className="metric-label">Down Speed:</span>
-                        <span className="metric-val speed-val">⚡ {formatBytes(t.downloadSpeed)}/s</span>
+                      <div className="dl-progress">
+                        <div className="bar">
+                          <div className="bar-fill" style={{ width: `${pct}%` }} />
+                        </div>
+                        <span className="dl-status">
+                          <span className="mono">{t.done ? '100%' : `${pct.toFixed(1)}%`}</span>
+                          <span className="dot-sep" />
+                          {status.label}
+                          {!t.done && t.length > 0 && (
+                            <>
+                              <span className="dot-sep" />
+                              <span className="mono">{formatBytes(t.downloaded)}</span>
+                            </>
+                          )}
+                        </span>
                       </div>
-                    )}
-
-                    {!isDone && t.uploadSpeed > 0 && (
-                      <div className="metric-item">
-                        <span className="metric-label">Up Speed:</span>
-                        <span className="metric-val">▲ {formatBytes(t.uploadSpeed)}/s</span>
+                    </td>
+                    <td className="col-num mono">{t.length ? formatBytes(t.length) : '—'}</td>
+                    <td className="col-num mono col-hide-sm">{t.done ? '—' : formatSpeed(t.downloadSpeed)}</td>
+                    <td className="col-num mono col-hide-sm muted">{formatSpeed(t.uploadSpeed)}</td>
+                    <td className="col-num mono col-hide-md muted">{t.numPeers || 0}</td>
+                    <td className="col-num mono muted">{t.done || t.paused ? '—' : formatEta(t.timeRemaining)}</td>
+                    <td className="col-actions">
+                      <div className="row-actions">
+                        {!t.done && (
+                          <button className="icon-btn" onClick={() => togglePause(t)} title={t.paused ? 'Resume' : 'Pause'} aria-label={t.paused ? 'Resume' : 'Pause'}>
+                            <Icon name={t.paused ? 'play' : 'pause'} />
+                          </button>
+                        )}
+                        <button className="icon-btn" onClick={() => openInPlayer(t)} title="Open in desktop player" aria-label="Open in desktop player">
+                          <Icon name="external" />
+                        </button>
+                        <button className="icon-btn" onClick={() => reveal(t.infoHash)} title="Show in Finder" aria-label="Show in Finder">
+                          <Icon name="folder" />
+                        </button>
+                        <button className="icon-btn" onClick={() => setDetailsId(t.infoHash)} title="Details" aria-label="Details">
+                          <Icon name="info" />
+                        </button>
+                        <button className="icon-btn icon-btn-danger" onClick={() => remove(t)} title="Remove" aria-label="Remove">
+                          <Icon name="trash" />
+                        </button>
                       </div>
-                    )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
-                    <div className="metric-item">
-                      <span className="metric-label">Peers:</span>
-                      <span className="metric-val peers-val">● {t.numPeers} connected</span>
-                    </div>
-
-                    {!isDone && (
-                      <div className="metric-item">
-                        <span className="metric-label">ETA:</span>
-                        <span className="metric-val">{isPaused ? 'Paused' : formatTime(t.timeRemaining)}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </main>
-
-      {/* Nerd Modal */}
-      {nerdModalTorrentId && (
-        <NerdModal
-          torrentId={nerdModalTorrentId}
-          onClose={() => setNerdModalTorrentId(null)}
+      {detailsId && (
+        <TorrentDetails
+          torrentId={detailsId}
+          onClose={() => setDetailsId(null)}
+          onReveal={() => reveal(detailsId)}
+          onOpen={() => openInPlayer({ infoHash: detailsId })}
         />
       )}
-    </div>
+    </section>
   );
 }

@@ -3,12 +3,17 @@ import cors from 'cors';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
+import net from 'node:net';
+import dgram from 'node:dgram';
 import { exec, spawn, execSync } from 'node:child_process';
 import zlib from 'node:zlib';
 import TorrentSearchApi from 'torrent-search-api';
 import WebTorrent from 'webtorrent';
+import Wire from 'bittorrent-protocol';
 import peerid from 'bittorrent-peerid';
 import MemoryChunkStore from 'memory-chunk-store';
+import { createTrackerList } from './lib/trackers.js';
+import { createSession } from './lib/session.js';
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -81,40 +86,12 @@ function ensureDownloadDir() {
 // Temporary streaming buffer cache — lives in macOS /tmp, auto-wiped on boot
 const STREAM_CACHE_DIR = path.join(os.tmpdir(), 'svorrent-cache');
 
-// Some search providers still return magnets containing only retired trackers.
-// Keep the original trackers, but add a small fallback set so metadata and
-// peers can still be discovered when one provider's tracker list is stale.
-const FALLBACK_TRACKERS = [
-  'udp://tracker.opentrackr.org:1337/announce',
-  'udp://open.stealth.si:80/announce',
-  'udp://tracker.torrent.eu.org:451/announce',
-  'udp://exodus.desync.com:6969/announce',
-  'udp://explodie.org:6969/announce',
-  'udp://tracker.coppersurfer.tk:6969/announce',
-  'udp://tracker.openbittorrent.com:6969/announce',
-  'udp://tracker.cyberia.is:6969/announce',
-  'wss://tracker.openwebtorrent.com',
-  'wss://tracker.btorrent.xyz',
-];
+// App state (session, tracker cache) lives outside the download folder.
+const DATA_DIR = path.join(os.homedir(), '.svorrent');
 
-function withFallbackTrackers(magnetURI) {
-  if (!magnetURI || !magnetURI.startsWith('magnet:?')) return magnetURI;
-
-  const existing = new Set();
-  for (const match of magnetURI.matchAll(/(?:^|&)tr=([^&]*)/g)) {
-    try {
-      existing.add(decodeURIComponent(match[1]));
-    } catch (e) {
-      existing.add(match[1]);
-    }
-  }
-
-  const additions = FALLBACK_TRACKERS
-    .filter((tracker) => !existing.has(tracker))
-    .map((tracker) => `tr=${encodeURIComponent(tracker)}`);
-
-  return additions.length > 0 ? `${magnetURI}&${additions.join('&')}` : magnetURI;
-}
+// Extra trackers are applied client-wide to every non-private torrent (see
+// lib/trackers.js). Stale provider trackers are a major cause of slow starts.
+const TRACKERS = createTrackerList(DATA_DIR);
 
 // Pure in-memory container parser to detect exact movie duration from piece 0
 function extractMediaDuration(buffer) {
@@ -269,10 +246,12 @@ function updatePrefetchWindow(torrent, file, byteOffset = 0) {
   const pHorizonEnd = Math.min(endPiece, p0 + (isPaused ? 90 : 50));
 
   try {
-    torrent.strategy = 'sequential';
+    // Streaming needs bytes in order. Full downloads keep rarest-first, which
+    // is much faster overall; the critical window below still gets priority.
+    if (torrent._isStreamOnly) torrent.strategy = 'sequential';
 
     // Deselect old pieces already consumed behind playback cursor (leave first 2 pieces for container headers)
-    if (currentPiece > startPiece + 12 && typeof torrent.deselect === 'function') {
+    if (torrent._isStreamOnly && currentPiece > startPiece + 12 && typeof torrent.deselect === 'function') {
       const deselectStart = startPiece + 2;
       const deselectEnd = currentPiece - 6;
       if (deselectEnd > deselectStart) {
@@ -330,12 +309,107 @@ function cleanStreamCache() {
 }
 cleanStreamCache();
 
-// Initialize WebTorrent with secure: 0 for Node 24 OpenSSL compatibility and tuned connection limits
+// ---------------------------------------------------------------------------
+// BitTorrent engine
+// ---------------------------------------------------------------------------
+
+function isPortFree(port) {
+  const tcp = new Promise((resolve) => {
+    const srv = net.createServer().once('error', () => resolve(false));
+    srv.listen(port, () => srv.close(() => resolve(true)));
+  });
+  const udp = new Promise((resolve) => {
+    const sock = dgram.createSocket('udp4').once('error', () => resolve(false));
+    sock.bind(port, () => sock.close(() => resolve(true)));
+  });
+  return Promise.all([tcp, udp]).then(([a, b]) => a && b);
+}
+
+// A fixed listening port lets UPnP/NAT-PMP keep a stable mapping, so other
+// peers can connect *to* us. Incoming connections are often the bulk of a
+// fast swarm; a random port per restart throws that away.
+async function pickPort(preferred) {
+  for (let p = preferred; p < preferred + 10; p += 2) {
+    if ((await isPortFree(p)) && (await isPortFree(p + 1))) return p;
+  }
+  return 0;
+}
+
+const TORRENT_PORT = await pickPort(Number(process.env.TORRENT_PORT) || 51413);
+const limit = (v) => (v ? Number(v) * 1024 : -1); // env values are KB/s
+
 const client = new WebTorrent({
-  secure: 0,
-  maxConns: 250,
+  // 1 = try protocol encryption first, fall back to plaintext. Reaches peers
+  // that *require* encryption and dodges ISP throttling of plain BitTorrent.
+  secure: 1,
+  maxConns: Number(process.env.MAX_CONNS) || 200, // per torrent
+  torrentPort: TORRENT_PORT,          // TCP + uTP
+  dhtPort: TORRENT_PORT ? TORRENT_PORT + 1 : 0,
   dht: true,
+  lsd: true,                          // find peers on the local network
+  utp: true,
+  natUpnp: true,
+  natPmp: true,
+  downloadLimit: limit(process.env.DOWNLOAD_LIMIT_KB),
+  uploadLimit: limit(process.env.UPLOAD_LIMIT_KB),
+  tracker: { announce: TRACKERS },
 });
+
+client.on('error', (err) => console.error('[engine] client error:', err.message));
+client.on('listening', () => {
+  console.log(`[engine] listening on port ${client.torrentPort} (TCP/uTP), DHT on ${client.dhtPort}`);
+});
+if (!Wire.nativeRC4) {
+  console.warn('[engine] Native RC4 unavailable; encrypted peers use a slower JS cipher. Start with `npm start` (adds --openssl-legacy-provider).');
+}
+
+const session = createSession(DATA_DIR);
+const saveSession = () => session.save(client.torrents);
+
+// Periodic session auto-save
+setInterval(() => {
+  saveSession();
+}, 20 * 1000).unref();
+
+async function restoreSession() {
+  const entries = session.load();
+  if (!entries || !entries.length) return;
+  console.log(`[session] Restoring ${entries.length} torrent(s) from persistent state...`);
+
+  for (const entry of entries) {
+    try {
+      const source = entry.torrentFile
+        ? Buffer.from(entry.torrentFile, 'base64')
+        : (entry.magnet ? enrichMagnetWithTrackers(entry.magnet) : null);
+
+      if (!source) continue;
+
+      const addOpts = {
+        path: entry.path || DOWNLOAD_DIR,
+      };
+      if (entry.bitfield) {
+        try {
+          addOpts.bitfield = Buffer.from(entry.bitfield, 'base64');
+        } catch (e) {}
+      }
+
+      const torrent = client.add(source, addOpts);
+      if (torrent) {
+        torrent._isPermanentDownload = true;
+        torrent._isStreamOnly = false;
+        torrent._diskBacked = true;
+        torrent._addedAt = entry.addedAt || Date.now();
+        if (entry.paused) {
+          torrent.paused = true;
+          torrent._pausedManually = true;
+        }
+        setupTorrentHooks(torrent);
+      }
+    } catch (err) {
+      console.warn(`[session] Could not restore ${entry.name || entry.infoHash}:`, err.message);
+    }
+  }
+}
 
 // Guard against unhandled torrent errors crashing the server process
 process.on('uncaughtException', (err) => {
@@ -347,7 +421,8 @@ process.on('unhandledRejection', (reason) => {
 
 // Graceful shutdown: destroy all torrents and wipe stream cache
 async function shutdownCleanup() {
-  console.log('\nSvorrent shutting down — wiping stream cache...');
+  console.log('\nSvorrent shutting down — saving session and wiping stream cache...');
+  saveSession();
   try {
     await new Promise((resolve) => client.destroy(resolve));
   } catch (e) {}
@@ -442,15 +517,78 @@ function extractInfoHash(uri) {
   return m ? m[1].toLowerCase() : null;
 }
 
+function enrichMagnetWithTrackers(magnetURI) {
+  if (!magnetURI || !magnetURI.startsWith('magnet:?')) return magnetURI;
+  const existing = new Set();
+  for (const match of magnetURI.matchAll(/(?:^|&)tr=([^&]*)/g)) {
+    try {
+      existing.add(decodeURIComponent(match[1]));
+    } catch (e) {
+      existing.add(match[1]);
+    }
+  }
+  const additions = TRACKERS
+    .filter((tr) => !existing.has(tr))
+    .slice(0, 12)
+    .map((tr) => `tr=${encodeURIComponent(tr)}`);
+  return additions.length > 0 ? `${magnetURI}&${additions.join('&')}` : magnetURI;
+}
+
+function setupTorrentHooks(torrent) {
+  if (!torrent || torrent._hooksConfigured) return;
+  torrent._hooksConfigured = true;
+
+  torrent.on('error', (err) => {
+    console.error(`[torrent error] [${torrent.name || torrent.infoHash}]:`, err.message);
+  });
+
+  // Fast Ramp-Up: as soon as a peer connects, unchoke and show interest
+  // so piece requests begin flowing immediately without waiting for rechoke cycles
+  torrent.on('wire', (wire) => {
+    try {
+      if (typeof wire.unchoke === 'function') wire.unchoke();
+      if (typeof wire.interested === 'function') wire.interested();
+    } catch (e) {}
+  });
+
+  torrent.once('ready', () => {
+    if (torrent._isPermanentDownload) {
+      // Swarm Rarest-First Strategy (BEP 3):
+      // Downloads rarest pieces first so peers reciprocate with maximum unchoked upload bandwidth
+      torrent.strategy = 'rarest';
+
+      // Select entire torrent range across all files with full priority
+      // allowing all connected swarm peers to supply pieces simultaneously
+      if (torrent.pieces && torrent.pieces.length > 0) {
+        torrent.select(0, torrent.pieces.length - 1);
+      }
+
+      if (torrent.wires) {
+        torrent.wires.forEach((w) => {
+          try {
+            w.unchoke();
+            w.interested();
+          } catch (e) {}
+        });
+      }
+    }
+    saveSession();
+  });
+
+  torrent.on('done', () => {
+    console.log(`[torrent done] Download completed: ${torrent.name || torrent.infoHash}`);
+    saveSession();
+  });
+}
+
 // Helper to get or add torrent
 async function getOrAddTorrent(magnetURI, opts = {}) {
   magnetURI = cleanMagnet(magnetURI);
   const targetInfoHash = extractInfoHash(magnetURI);
-  magnetURI = withFallbackTrackers(magnetURI);
+  magnetURI = enrichMagnetWithTrackers(magnetURI);
   let torrent = targetInfoHash ? await client.get(targetInfoHash) : await client.get(magnetURI);
 
   // Clean truly idle stream torrents (idle > 30 mins with zero active streams)
-  // Active streams are always protected via torrent._activeStreams
   const now = Date.now();
   client.torrents.forEach((t) => {
     const hasStreams = (t._activeStreams || 0) > 0;
@@ -462,18 +600,11 @@ async function getOrAddTorrent(magnetURI, opts = {}) {
     }
   });
 
-  // A stream torrent uses MemoryChunkStore and cannot be converted into a
-  // disk download by changing flags later. Recreate it with WebTorrent's
-  // filesystem store when the user explicitly asks to download the file.
   if (torrent && opts.isPermanentDownload) {
-    const materializedFile = torrent.files?.some((file) => {
-      const filePath = path.join(DOWNLOAD_DIR, file.path || '');
-      return fs.existsSync(filePath);
-    });
     const needsDiskStore = torrent._isStreamOnly ||
       torrent._diskBacked !== true ||
       torrent.path !== DOWNLOAD_DIR;
-    if (needsDiskStore && !materializedFile) {
+    if (needsDiskStore) {
       await new Promise((resolve) => {
         try {
           client.remove(torrent, { destroyStore: false }, resolve);
@@ -489,8 +620,6 @@ async function getOrAddTorrent(magnetURI, opts = {}) {
   if (!torrent) {
     const isPermanent = opts.isPermanentDownload === true || (!opts.isStreamOnly && opts.path === DOWNLOAD_DIR);
 
-    // Stream-only torrents use in-memory storage (zero disk footprint, like Netflix).
-    // Permanent downloads use ~/Downloads/Svorrent on disk as expected.
     if (isPermanent) ensureDownloadDir();
     const addOpts = isPermanent
       ? { path: opts.path || DOWNLOAD_DIR }
@@ -512,60 +641,13 @@ async function getOrAddTorrent(magnetURI, opts = {}) {
       torrent._isStreamOnly = !isPermanent;
       torrent._diskBacked = isPermanent;
       torrent._addedAt = Date.now();
-      torrent.on('error', (err) => {
-        console.error('Torrent runtime error:', err.message);
-      });
+      setupTorrentHooks(torrent);
     }
-    if (torrent) {
-      torrent.once('ready', () => {
-      if (torrent.files && torrent.files.length > 0) {
-        const largestFile = torrent.files.reduce((a, b) => (a.length > b.length ? a : b));
-        if (torrent._isStreamOnly) {
-          torrent.files.forEach((f) => {
-            if (f !== largestFile && typeof f.deselect === 'function') f.deselect();
-          });
-          if (typeof largestFile.select === 'function') largestFile.select();
-        }
-
-        // Keep an immediately visible, genuinely downloaded partial file in
-        // Finder while the filesystem chunk store is still filling pieces.
-        // The normal WebTorrent store remains the source of truth; this sidecar
-        // is renamed when the sequential file stream reaches EOF.
-        if (torrent._isPermanentDownload && !torrent._materializerStarted) {
-          torrent._materializerStarted = true;
-          const partialPath = path.join(DOWNLOAD_DIR, `${largestFile.path}.svorrent-partial`);
-          const finalPath = path.join(DOWNLOAD_DIR, largestFile.path);
-          fs.mkdirSync(path.dirname(partialPath), { recursive: true });
-          const output = fs.createWriteStream(partialPath);
-          const input = largestFile.createReadStream();
-          input.on('error', (err) => {
-            console.warn('Partial download materializer stopped:', err.message);
-            output.destroy();
-          });
-          output.on('error', (err) => {
-            console.warn('Partial download file error:', err.message);
-            input.destroy();
-          });
-          input.on('end', () => {
-            if (fs.existsSync(finalPath)) {
-              try { fs.unlinkSync(partialPath); } catch (e) {}
-            } else {
-              try { fs.renameSync(partialPath, finalPath); } catch (e) {}
-            }
-          });
-          input.pipe(output);
-        }
-
-        if (typeof torrent.select === 'function' && typeof largestFile._startPiece === 'number') {
-          updatePrefetchWindow(torrent, largestFile, 0);
-        }
-      }
-    });
-  }
   } else if (opts.isPermanentDownload && torrent) {
     torrent._isPermanentDownload = true;
     torrent._isStreamOnly = false;
     torrent._diskBacked = true;
+    setupTorrentHooks(torrent);
   }
   return torrent;
 }
@@ -805,6 +887,7 @@ app.post('/api/torrent/:id/pause', async (req, res) => {
     });
   }
 
+  saveSession();
   res.json({ success: true, paused: true });
 });
 
@@ -835,6 +918,7 @@ app.post('/api/torrent/:id/resume', async (req, res) => {
   }
   try { torrent._drain(); } catch (e) {}
 
+  saveSession();
   res.json({ success: true, paused: false });
 });
 
@@ -844,6 +928,7 @@ app.post('/api/torrent/:id/delete', async (req, res) => {
   if (!torrent) return res.status(404).json({ error: 'Torrent not found' });
   const { deleteFiles } = req.body;
   torrent.destroy({ destroyStore: !!deleteFiles }, () => {
+    saveSession();
     res.json({ success: true, deleted: true });
   });
 });
@@ -1832,4 +1917,5 @@ app.get('/api/torrent/alternatives', async (req, res) => {
 app.listen(port, () => {
   console.log(`Svorrent API running on http://localhost:${port}`);
   console.log(`Native downloads directory: ${DOWNLOAD_DIR}`);
+  restoreSession().catch((err) => console.error('[session] restore error:', err.message));
 });
