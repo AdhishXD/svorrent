@@ -1358,33 +1358,7 @@ a {
   background: #121314;
 }
 
-/* Architecture Technical Note */
-.architecture-note {
-  display: flex;
-  gap: 12px;
-  padding: 14px 16px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  font-size: 12.5px;
-  line-height: 1.5;
-  color: var(--text-2);
-}
 
-.arch-icon {
-  color: var(--text-3);
-  flex-shrink: 0;
-  margin-top: 1px;
-}
-
-.code-inline {
-  font-family: var(--mono);
-  font-size: 11.5px;
-  background: var(--surface-2);
-  padding: 1px 4px;
-  border-radius: 3px;
-  color: var(--text);
-}
 
 /* ---------- Local Files & Halfway Recovery (Inline in Downloads Table) ---------- */
 

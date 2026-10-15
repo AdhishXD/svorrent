@@ -386,16 +386,6 @@ export function NetworksPage({ notify }) {
           </table>
         )}
       </div>
-
-      {/* Technical Architecture Note */}
-      <div className="architecture-note">
-        <div className="arch-icon">
-          <Icon name="info" size={16} />
-        </div>
-        <div className="arch-text">
-          <strong>Kernel-level socket striping (inspired by Plexo):</strong> Standard macOS routes all traffic through the single default route service order. Svorrent overrides this limitation by using <code className="code-inline">opts.localAddress</code> when connecting to peers, binding distinct TCP streams directly to specific local interface IPs. When you have Wi-Fi and USB phone tethering or Ethernet connected simultaneously, peers are striped across both physical hardware connections, aggregating your total download bandwidth.
-        </div>
-      </div>
     </section>
   );
 }
