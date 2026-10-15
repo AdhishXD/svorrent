@@ -157,6 +157,8 @@ async function restoreSession() {
       if (torrent) {
         torrent._isPermanentDownload = true;
         torrent._addedAt = entry.addedAt || Date.now();
+        if (entry.bitfield) torrent._savedBitfield = entry.bitfield;
+        if (entry.torrentFile) torrent._savedTorrentFile = entry.torrentFile;
         if (entry.paused) {
           torrent.paused = true;
           torrent._pausedManually = true;
@@ -291,6 +293,18 @@ async function getOrAddTorrent(magnetURI, opts = {}) {
     ensureDownloadDir();
     const addOpts = { path: opts.path || DOWNLOAD_DIR };
 
+    if (opts.bitfield) {
+      addOpts.bitfield = opts.bitfield;
+    } else if (targetInfoHash) {
+      try {
+        const savedEntries = session.load();
+        const existing = savedEntries.find((e) => e.infoHash?.toLowerCase() === targetInfoHash.toLowerCase());
+        if (existing?.bitfield) {
+          addOpts.bitfield = Buffer.from(existing.bitfield, 'base64');
+        }
+      } catch (e) {}
+    }
+
     try {
       torrent = client.add(magnetURI, addOpts);
     } catch (addErr) {
@@ -305,6 +319,9 @@ async function getOrAddTorrent(magnetURI, opts = {}) {
     if (torrent) {
       torrent._isPermanentDownload = true;
       torrent._addedAt = Date.now();
+      if (addOpts.bitfield) {
+        torrent._savedBitfield = Buffer.isBuffer(addOpts.bitfield) ? addOpts.bitfield.toString('base64') : addOpts.bitfield;
+      }
       setupTorrentHooks(torrent);
     }
   } else {

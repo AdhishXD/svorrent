@@ -314,20 +314,33 @@ export class NetworkManager {
       for (const t of client.torrents) {
         if (!t.wires) continue;
         for (const wire of t.wires) {
-          let ifaceId = this.wireToInterface.get(wire);
-          if (!ifaceId || !availableActiveIds.includes(ifaceId)) {
-            // 1. Check direct socket map recorded at connect time
-            if (wire.conn && this.socketToInterface.has(wire.conn)) {
-              ifaceId = this.socketToInterface.get(wire.conn);
-            }
-            // 2. Check bound localAddress on socket
-            if (!ifaceId || !availableActiveIds.includes(ifaceId)) {
-              const localAddr = wire.conn?.localAddress || wire.remoteAddress;
-              const match = ifaces.find((i) => i.ip === localAddr && !this.disabledIds.has(i.id));
-              ifaceId = match ? match.id : availableActiveIds[wireIdx % availableActiveIds.length];
-            }
-            this.wireToInterface.set(wire, ifaceId);
+          let ifaceId = null;
+
+          // 1. Direct kernel localAddress match on active physical interface
+          if (wire.conn?.localAddress) {
+            const match = ifaces.find((i) => i.ip === wire.conn.localAddress && !this.disabledIds.has(i.id));
+            if (match) ifaceId = match.id;
           }
+
+          // 2. Fall back to socket mapping registered at connect()
+          if (!ifaceId && wire.conn && this.socketToInterface.has(wire.conn)) {
+            const mapped = this.socketToInterface.get(wire.conn);
+            if (availableActiveIds.includes(mapped) && !this.disabledIds.has(mapped)) {
+              ifaceId = mapped;
+            }
+          }
+
+          // 3. Fall back to existing cached wire assignment or round-robin
+          if (!ifaceId || !availableActiveIds.includes(ifaceId)) {
+            const existing = this.wireToInterface.get(wire);
+            if (existing && availableActiveIds.includes(existing) && !this.disabledIds.has(existing)) {
+              ifaceId = existing;
+            } else {
+              ifaceId = availableActiveIds[wireIdx % availableActiveIds.length];
+            }
+          }
+
+          this.wireToInterface.set(wire, ifaceId);
           wireIdx++;
 
           const downSpeed = typeof wire.downloadSpeed === 'function' ? wire.downloadSpeed() : 0;

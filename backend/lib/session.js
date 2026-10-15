@@ -23,20 +23,49 @@ export function createSession(dataDir) {
   };
 
   const save = (torrents) => {
+    const existingMap = new Map();
+    try {
+      const currentOnDisk = load();
+      for (const e of currentOnDisk) {
+        if (e.infoHash) existingMap.set(e.infoHash.toLowerCase(), e);
+      }
+    } catch (e) {}
+
     const entries = torrents
       .filter((t) => t._isPermanentDownload && !t.destroyed)
-      .map((t) => ({
-        infoHash: t.infoHash,
-        magnet: t.magnetURI,
-        name: t.name,
-        path: t.path,
-        paused: !!t._pausedManually,
-        addedAt: t._addedAt || Date.now(),
-        torrentFile: t.torrentFile ? Buffer.from(t.torrentFile).toString('base64') : null,
-        bitfield: t.ready && t.bitfield
-          ? Buffer.from(t.bitfield.buffer.buffer, t.bitfield.buffer.byteOffset, t.bitfield.buffer.byteLength).toString('base64')
-          : null,
-      }));
+      .map((t) => {
+        const hashKey = (t.infoHash || '').toLowerCase();
+        const existing = existingMap.get(hashKey);
+
+        let bitfieldStr = null;
+        if (t.ready && t.bitfield) {
+          bitfieldStr = Buffer.from(t.bitfield.buffer.buffer, t.bitfield.buffer.byteOffset, t.bitfield.buffer.byteLength).toString('base64');
+        } else if (t._savedBitfield) {
+          bitfieldStr = t._savedBitfield;
+        } else if (existing?.bitfield) {
+          bitfieldStr = existing.bitfield;
+        }
+
+        let torrentFileStr = null;
+        if (t.torrentFile) {
+          torrentFileStr = Buffer.from(t.torrentFile).toString('base64');
+        } else if (t._savedTorrentFile) {
+          torrentFileStr = t._savedTorrentFile;
+        } else if (existing?.torrentFile) {
+          torrentFileStr = existing.torrentFile;
+        }
+
+        return {
+          infoHash: t.infoHash,
+          magnet: t.magnetURI || existing?.magnet,
+          name: t.name || existing?.name,
+          path: t.path || existing?.path,
+          paused: !!t._pausedManually,
+          addedAt: t._addedAt || existing?.addedAt || Date.now(),
+          torrentFile: torrentFileStr,
+          bitfield: bitfieldStr,
+        };
+      });
 
     // Write atomically so a crash mid-write never corrupts the session.
     const tmp = `${file}.tmp`;
