@@ -11,12 +11,12 @@ The search interface aggregates results concurrently across public indexers (inc
 - Queries are deduplicated, normalized, and sortable by seeds, leechers, file size, or indexer source.
 - Magnets launch directly into the download pipeline with a single click.
 
-![Search Interface](docs/screenshots/search.png)
+![Search Interface](docs/screenshots/search.webp)
 
 ### 2. Downloads Manager & Streaming Controls
 The downloads dashboard manages active transfers, sequential chunk scheduling, and instant media playback.
 
-![Downloads Manager](docs/screenshots/downloads.png)
+![Downloads Manager](docs/screenshots/downloads.webp)
 
 #### 2.1 Sequential Piece Scheduling & Crash Recovery
 - Forces sequential piece acquisition (from piece 0 to piece N) to enable immediate streaming instead of random piece distribution.
@@ -35,7 +35,7 @@ $$\text{Download ETA} \times 1.20 \le \text{Video Runtime}$$
 #### 2.3 Per-Torrent Swarm Topology & GeoIP Inspector
 Every download row includes an isolated Swarm Map button opening a per-torrent inspector.
 
-![Swarm Map and Topology Inspector](docs/screenshots/swarm_modal.png)
+![Swarm Map and Topology Inspector](docs/screenshots/swarm_modal.webp)
 
 - Renders an interactive vector SVG world map plotting peer centroids without WebGL overhead.
 - Maps remote peer IP addresses to countries and cities using an offline `geoip-lite` database.
@@ -45,7 +45,7 @@ Every download row includes an isolated Swarm Map button opening a per-torrent i
 ### 3. Multi-Interface Network Bonding
 Svorrent aggregates bandwidth across multiple active network connections by binding outgoing peer sockets at the OS kernel level.
 
-![Network Bonding Interface](docs/screenshots/networks.png)
+![Network Bonding Interface](docs/screenshots/networks.webp)
 
 - Outgoing TCP and uTP peer connections are distributed across available network devices (`en0` Wi-Fi, `feth0` Android USB tether, `en1` Ethernet) to maximize aggregate throughput.
 - An autonomous background daemon (`scripts/tether-daemon.js`) polls for connected Android devices via `adb`, enables USB tethering mode automatically without passwords, acquires local DHCP addresses, and configures multi-path routing rules.
