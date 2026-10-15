@@ -636,12 +636,6 @@ app.post('/api/networks/:id/toggle', (req, res) => {
   res.json({ success: true, ...networkManager.getSnapshot() });
 });
 
-app.post('/api/networks/simulate', (req, res) => {
-  const { enabled } = req.body;
-  networkManager.toggleSimulation(!!enabled);
-  res.json({ success: true, ...networkManager.getSnapshot() });
-});
-
 // ---------------------------------------------------------------------------
 // Local Download Folder Inspection & Halfway Download Recovery
 // ---------------------------------------------------------------------------
