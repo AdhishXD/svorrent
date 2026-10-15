@@ -1,49 +1,54 @@
 # Svorrent
 
-Svorrent is a local BitTorrent client and indexing engine built with Node.js, WebTorrent, and React. It implements sequential piece streaming, multi-network socket bonding across physical interfaces, offline GeoIP swarm visualization, and continuous buffer-free media playback.
+Svorrent is a local BitTorrent client and indexing engine built with Node.js, WebTorrent, and React. It implements multi-tracker search aggregation, sequential piece streaming with buffer-free playback, per-torrent swarm visualization, and multi-network socket bonding across physical interfaces.
 
 ---
 
-## Key Features
+## Features & Interface Workflow
 
-### 1. Multi-Interface Network Bonding
-Svorrent bonds multiple active network interfaces at the OS kernel socket level to aggregate download bandwidth across connections.
-- Outgoing peer TCP/uTP connections bind round-robin or proportionally across available network devices (`en0` Wi-Fi, `feth0` USB tether, `en1` Ethernet, etc.).
-- An autonomous Android tethering daemon (`scripts/tether-daemon.js`) polls for connected Android handsets via `adb`, configures RNDIS/NCM tethering mode automatically without passwords, assigns local DHCP leases, and establishes multi-path routes.
-
-![Network Bonding Interface](docs/screenshots/networks.png)
-
-### 2. Buffer-Free Streaming & Media Playback
-Instead of requiring a torrent to complete before playback, Svorrent calculates an objective buffer threshold and streams growing files directly into VLC or the system default video player.
-- The first 25 MB and initial 20 pieces are marked critical to ensure container headers, audio track definitions, and chapter indices download immediately.
-- Container runtimes are parsed asynchronously using `ffprobe`.
-- Svorrent continuously evaluates the physical streaming condition:
-  $$\text{Download ETA} \times 1.20 \le \text{Video Runtime}$$
-- The playback button remains disabled while buffering, displaying the exact byte deficit and estimated time remaining on hover. Once the safety margin is reached, the button enables and launches VLC directly against the expanding file on disk.
-
-![Downloads Manager and Streaming Controls](docs/screenshots/downloads.png)
-
-### 3. Swarm Topology & GeoIP Inspector
-Every active download includes an integrated swarm inspector accessible from the downloads list.
-- Renders an interactive vector SVG map displaying worldwide peer distributions without WebGL dependencies.
-- Translates remote peer IPs to physical countries and cities via offline `geoip-lite` databases.
-- Categorizes peer wires by physical network interface (Wi-Fi, USB Tether, Ethernet) with individual throughput counters.
-- Identifies remote client software signatures (qBittorrent, Transmission, libtorrent, Deluge).
-
-![Swarm Map and Topology Inspector](docs/screenshots/swarm_modal.png)
-
-### 4. Sequential Piece Allocation & Crash Recovery
-BitTorrent swarms natively distribute pieces out of order. Svorrent forces strict sequential piece acquisition to support in-progress media playback and predictable disk writes.
-- Bitfield verification checkpoints write to `session.json` on every verified piece.
-- If the daemon crashes or the system loses power, Svorrent reads existing disk blocks on startup and verifies bitfields against piece hashes, avoiding full re-downloads.
-- A local folder scanner detects orphaned or interrupted files in `~/Downloads/Svorrent` and matches them to magnet hashes for one-click resumption.
-
-### 5. Multi-Indexer Search Aggregation
-- Concurrently queries public indexers (The Pirate Bay, LimeTorrents, TorrentProject).
-- Deduplicates incoming results, normalizes byte representations, and sorts by seeders, leechers, or file size.
+### 1. Multi-Tracker Search Aggregation
+The search interface aggregates results concurrently across public indexers (including The Pirate Bay, LimeTorrents, and TorrentProject).
+- Queries are deduplicated, normalized, and sortable by seeds, leechers, file size, or indexer source.
 - Magnets launch directly into the download pipeline with a single click.
 
 ![Search Interface](docs/screenshots/search.png)
+
+### 2. Downloads Manager & Streaming Controls
+The downloads dashboard manages active transfers, sequential chunk scheduling, and instant media playback.
+
+![Downloads Manager](docs/screenshots/downloads.png)
+
+#### 2.1 Sequential Piece Scheduling & Crash Recovery
+- Forces sequential piece acquisition (from piece 0 to piece N) to enable immediate streaming instead of random piece distribution.
+- Prioritizes container headers and initial chapters (first 25 MB and initial 20 pieces) with critical queue weighting.
+- Atomic bitfield state checkpoints write to `session.json` on every verified block, ensuring that daemon restarts or power interruptions resume immediately from existing disk blocks without re-checking or re-downloading.
+- Scans `~/Downloads/Svorrent` to detect orphaned files and halfway downloads, matching them to magnet hashes for one-click resumption.
+
+#### 2.2 Buffer-Free Streaming & VLC Integration
+Instead of waiting for an entire file to finish downloading, Svorrent continuously evaluates the physical streaming condition:
+$$\text{Download ETA} \times 1.20 \le \text{Video Runtime}$$
+
+- Media container runtimes are extracted in the background via `ffprobe` (or estimated from container size if unprobed).
+- While downloading, the Play button remains disabled and greyed out, with its hover tooltip displaying the exact byte buffer needed and estimated time remaining until continuous playback is guaranteed.
+- Once the 20% safety threshold is satisfied, the Play button activates in cyan. Clicking it executes `open -a VLC <filepath>`, opening the growing file directly in VLC (or the system default media player).
+
+#### 2.3 Per-Torrent Swarm Topology & GeoIP Inspector
+Every download row includes an isolated Swarm Map button opening a per-torrent inspector.
+
+![Swarm Map and Topology Inspector](docs/screenshots/swarm_modal.png)
+
+- Renders an interactive vector SVG world map plotting peer centroids without WebGL overhead.
+- Maps remote peer IP addresses to countries and cities using an offline `geoip-lite` database.
+- Provides dynamic segmented filters across connected network interfaces (Wi-Fi, USB Tether, Ethernet, Bridges) with color-coded throughput metrics.
+- Displays ranked country contributions and a searchable peer wire table with remote client software identification (qBittorrent, Transmission, Deluge, libtorrent).
+
+### 3. Multi-Interface Network Bonding
+Svorrent aggregates bandwidth across multiple active network connections by binding outgoing peer sockets at the OS kernel level.
+
+![Network Bonding Interface](docs/screenshots/networks.png)
+
+- Outgoing TCP and uTP peer connections are distributed across available network devices (`en0` Wi-Fi, `feth0` Android USB tether, `en1` Ethernet) to maximize aggregate throughput.
+- An autonomous background daemon (`scripts/tether-daemon.js`) polls for connected Android devices via `adb`, enables USB tethering mode automatically without passwords, acquires local DHCP addresses, and configures multi-path routing rules.
 
 ---
 
@@ -67,10 +72,10 @@ svorrent/
 └── frontend/
     ├── src/
     │   ├── App.jsx              # Navigation and global polling loop
+    │   ├── SearchPage.jsx       # Multi-tracker search query interface
     │   ├── DownloadsManager.jsx # Download queue, action controls, and VLC triggers
     │   ├── SwarmModal.jsx       # Swarm inspector, country charts, and peer table
     │   ├── SwarmWorldMap.jsx    # SVG vector map with centroid peer plotting
-    │   ├── SearchPage.jsx       # Multi-tracker search query interface
     │   ├── NetworksPage.jsx     # Network adapter status and traffic telemetry
     │   └── TorrentDetails.jsx   # Inspector for trackers, files, and bitfield pieces
     └── package.json
@@ -82,9 +87,9 @@ svorrent/
 
 ### Prerequisites
 - Node.js (v18 or higher)
-- Optional: VLC Media Player installed (`/Applications/VLC.app` or `vlc` in PATH)
-- Optional: `ffprobe` installed for exact container runtime parsing
-- Optional for Android bonding: `adb` installed (`brew install android-platform-tools`)
+- Optional: VLC Media Player (`/Applications/VLC.app` or `vlc` in PATH)
+- Optional: `ffprobe` for container runtime extraction
+- Optional for Android bonding: `adb` (`brew install android-platform-tools`)
 
 ### 1. Backend Setup
 
@@ -94,7 +99,7 @@ npm install
 npm start
 ```
 
-The backend API initializes on `http://localhost:3001`. Torrents and partial downloads are stored in `~/Downloads/Svorrent/`.
+The API service runs on `http://localhost:3001`. Downloads are written to `~/Downloads/Svorrent/`.
 
 ### 2. Frontend Setup
 
@@ -104,17 +109,17 @@ npm install
 npm run dev
 ```
 
-The web dashboard is accessible at `http://localhost:5173`.
+The interface runs on `http://localhost:5173`.
 
 ### 3. Optional: Android USB Tether Daemon (macOS)
-To automatically bond an Android phone's mobile connection alongside Wi-Fi:
+To bond an Android phone's mobile connection alongside Wi-Fi automatically:
 
 ```bash
 cd backend
 npm run setup:tether
 ```
 
-This installs a background launchd daemon that detects Android devices connected via USB, enables tethering mode automatically, and exposes the `feth0` network interface to Svorrent.
+This installs a system launchd daemon that detects Android devices connected via USB, enables tethering mode, and configures the `feth0` network interface.
 
 ---
 
@@ -122,7 +127,7 @@ This installs a background launchd daemon that detects Android devices connected
 
 | Component | Implementation |
 | :--- | :--- |
-| BitTorrent Core | WebTorrent, bittorrent-protocol, bittorrent-dht |
+| BitTorrent Protocol | WebTorrent, bittorrent-protocol, bittorrent-dht |
 | Network Routing | OS socket binding via local IP assignment |
 | Media Analysis | ffprobe metadata extraction + analytic ETA-vs-runtime buffer formula |
 | Swarm Map | Native SVG with BBox centroid coordinates (zero WebGL) |
