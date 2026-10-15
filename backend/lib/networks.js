@@ -67,7 +67,14 @@ export class NetworkManager {
 
     // Start background scanner
     this.refreshHardwarePorts();
-    this.intervalId = setInterval(() => this.tick(), 1000);
+    this.tickCount = 0;
+    this.intervalId = setInterval(() => {
+      this.tickCount++;
+      if (this.tickCount % 5 === 0) {
+        this.refreshHardwarePorts();
+      }
+      this.tick();
+    }, 1000);
     this.intervalId.unref?.();
 
     // Hook net.connect to bind outgoing peer sockets to local interfaces
