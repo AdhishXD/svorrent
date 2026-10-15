@@ -4,7 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "node --openssl-legacy-provider server.js"
+    "start": "node --openssl-legacy-provider server.js",
+    "setup:tether": "sudo ./scripts/install-tetherd.sh",
+    "uninstall:tether": "sudo ./scripts/uninstall-tetherd.sh"
   },
   "keywords": [],
   "author": "",

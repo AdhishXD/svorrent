@@ -4,10 +4,15 @@
 
 import os from 'node:os';
 import net from 'node:net';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execAsync = promisify(exec);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const TETHER_BIN = path.resolve(__dirname, '../bin/tetherkit');
 
 function classifyInterface(name, device) {
   const s = `${name} ${device}`.toLowerCase();
@@ -65,14 +70,18 @@ export class NetworkManager {
     this.wireToInterface = new WeakMap();
     this.socketToInterface = new WeakMap();
     this.stats = new Map(); // id -> { downloaded: 0, uploaded: 0, currentDown: 0, currentUp: 0, peers: 0, history: [] }
+    this.usbTetherDevice = { found: false, name: null };
+    this.isTetherDaemonRunning = false;
 
     // Start background scanner
     this.refreshHardwarePorts();
+    this.checkUsbTether();
     this.tickCount = 0;
     this.intervalId = setInterval(() => {
       this.tickCount++;
       if (this.tickCount % 5 === 0) {
         this.refreshHardwarePorts();
+        this.checkUsbTether();
       }
       this.tick();
     }, 1000);
@@ -80,6 +89,34 @@ export class NetworkManager {
 
     // Hook net.connect to bind outgoing peer sockets to local interfaces
     this.hookNetConnect();
+  }
+
+  async checkUsbTether() {
+    try {
+      const { stdout } = await execAsync(`"${TETHER_BIN}" --list`);
+      if (stdout.includes('RNDIS devices found:')) {
+        let deviceName = 'Android Device';
+        if (stdout.includes('04e8:')) {
+          deviceName = 'Samsung Galaxy S23';
+        }
+        this.usbTetherDevice = {
+          found: true,
+          name: deviceName,
+          details: stdout.trim(),
+        };
+      } else {
+        this.usbTetherDevice = { found: false, name: null };
+      }
+    } catch (e) {
+      this.usbTetherDevice = { found: false, name: null };
+    }
+
+    try {
+      const { stdout: pgrepOut } = await execAsync('pgrep -x svorrent-tetherd');
+      this.isTetherDaemonRunning = !!pgrepOut.trim();
+    } catch (e) {
+      this.isTetherDaemonRunning = false;
+    }
   }
 
   async refreshHardwarePorts() {
@@ -401,6 +438,12 @@ export class NetworkManager {
       bondedCount: bondedInterfaces.length,
       connectedCount: enriched.filter((i) => i.connected).length,
       aggregateHistory,
+      usbTether: {
+        detected: this.usbTetherDevice?.found || false,
+        name: this.usbTetherDevice?.name || null,
+        daemonActive: this.isTetherDaemonRunning,
+        interfaceActive: all.some((i) => i.device.startsWith('feth') && i.connected),
+      },
     };
   }
 }

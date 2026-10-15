@@ -172,7 +172,19 @@ export function NetworksPage({ notify }) {
         </div>
       </div>
 
-
+      {data?.usbTether?.detected && !data?.usbTether?.interfaceActive && (
+        <div className="usb-tether-banner">
+          <div className="usb-tether-dot" />
+          <div className="usb-tether-content">
+            <span className="usb-tether-title">
+              {data.usbTether.name || 'Android Device'} detected via USB
+            </span>
+            <span className="usb-tether-hint muted">
+              To enable automated plug-and-play bonding without password prompts, run the one-time daemon setup: <code>sudo ./backend/scripts/install-tetherd.sh</code>
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Top Telemetry KPI Cards */}
       <div className="stat-grid network-kpi-grid">

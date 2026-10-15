@@ -976,8 +976,49 @@ a {
 
 /* ---------- Networks & Infographics Page ---------- */
 
-.networks-page {
-  padding-bottom: 64px;
+.usb-tether-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid #34d399;
+  border-radius: var(--radius);
+  padding: 10px 16px;
+  margin-bottom: 20px;
+  font-size: 13px;
+}
+
+.usb-tether-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #34d399;
+  flex-shrink: 0;
+}
+
+.usb-tether-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.usb-tether-title {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.usb-tether-hint {
+  font-size: 12px;
+}
+
+.usb-tether-hint code {
+  background: var(--bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--font-mono);
 }
 
 .network-kpi-grid {
