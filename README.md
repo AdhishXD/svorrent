@@ -42,13 +42,15 @@ Every download row includes an isolated Swarm Map button opening a per-torrent i
 - Provides dynamic segmented filters across connected network interfaces (Wi-Fi, USB Tether, Ethernet, Bridges) with color-coded throughput metrics.
 - Displays ranked country contributions and a searchable peer wire table with remote client software identification (qBittorrent, Transmission, Deluge, libtorrent).
 
-### 3. Multi-Interface Network Bonding
-Svorrent aggregates bandwidth across multiple active network connections by binding outgoing peer sockets at the OS kernel level.
+### 3. Multi-Network Pooling & Bandwidth Bonding
+Svorrent lets you combine multiple separate internet connections and pool them together as a single aggregated pipeline to multiply download throughput.
 
 ![Network Bonding Interface](docs/screenshots/networks.webp)
 
-- Outgoing TCP and uTP peer connections are distributed across available network devices (`en0` Wi-Fi, `feth0` Android USB tether, `en1` Ethernet) to maximize aggregate throughput.
-- An autonomous native tethering daemon (`svorrent-tetherd`) polls for connected Android devices, enables USB tethering mode automatically without passwords, acquires local DHCP addresses, and configures multi-path routing rules.
+- **Combined Speed Pooling**: Rather than locking your system to a single connection, Svorrent pools all active networks together. For example, if your home Wi-Fi delivers 6 MB/s and you connect an Android phone over USB providing 2.5 MB/s, Svorrent pools both gateways simultaneously to download at 8.5 MB/s. You can pool Wi-Fi, cellular tethering, Ethernet, and secondary USB network adapters into a single shared pipeline.
+- **Kernel-Level Socket Striping**: Because BitTorrent relies on dozens of concurrent peer wires, Svorrent binds discrete outgoing TCP sockets to each physical network adapter's local IP address (`localAddress`). Peer traffic is distributed across all enabled interfaces, pooling bandwidth without requiring paid bonding VPN subscriptions or multi-WAN hardware routers.
+- **Plug-and-Play Android USB Tethering**: Connecting an Android phone via USB automatically triggers the native `svorrent-tetherd` background daemon. The service activates USB tethering mode without passwords or root, assigns local IP routing, and immediately pools the mobile data connection with your Wi-Fi.
+- **Per-Adapter Controls & Live Telemetry**: Any interface in the pool can be enabled or disabled on the fly from the Networks dashboard, which displays real-time bandwidth balancing percentages, per-adapter sparklines, and session data counters.
 
 ---
 
