@@ -51,7 +51,7 @@ function App() {
     toastTimer.current = setTimeout(() => setToast(null), 3200);
   }, []);
 
-  const downloads = torrents.filter((t) => t.isPermanentDownload || !t.isStreamOnly);
+  const downloads = torrents;
   const active = downloads.filter((t) => !t.done && !t.paused).length;
   const down = downloads.reduce((sum, t) => sum + (t.downloadSpeed || 0), 0);
   const up = downloads.reduce((sum, t) => sum + (t.uploadSpeed || 0), 0);

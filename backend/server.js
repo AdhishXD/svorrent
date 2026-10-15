@@ -5,77 +5,18 @@ import path from 'node:path';
 import fs from 'node:fs';
 import net from 'node:net';
 import dgram from 'node:dgram';
-import { exec, spawn, execSync } from 'node:child_process';
-import zlib from 'node:zlib';
+import { spawn, exec } from 'node:child_process';
 import TorrentSearchApi from 'torrent-search-api';
 import WebTorrent from 'webtorrent';
 import Wire from 'bittorrent-protocol';
 import peerid from 'bittorrent-peerid';
-import MemoryChunkStore from 'memory-chunk-store';
 import { createTrackerList } from './lib/trackers.js';
 import { createSession } from './lib/session.js';
 
 const app = express();
 const port = process.env.PORT || 3001;
 
-// Path to FFmpeg & FFprobe binary
-const FFMPEG_BIN = process.env.FFMPEG_PATH || (fs.existsSync('/Users/soveet/miniforge3/bin/ffmpeg') ? '/Users/soveet/miniforge3/bin/ffmpeg' : 'ffmpeg');
-const FFPROBE_BIN = process.env.FFPROBE_PATH || (fs.existsSync('/Users/soveet/miniforge3/bin/ffprobe') ? '/Users/soveet/miniforge3/bin/ffprobe' : 'ffprobe');
-
-// Universal Cross-Platform Video Transcoding Engine (Linux, Windows, macOS, Docker)
-let detectedH264Encoder = 'libx264';
-let encoderIsHardwareAccelerated = false;
-
-function detectBestEncoder() {
-  try {
-    const output = execSync(`${FFMPEG_BIN} -encoders 2>/dev/null`, { encoding: 'utf8' });
-    if (output.includes('h264_nvenc')) {
-      detectedH264Encoder = 'h264_nvenc';
-      encoderIsHardwareAccelerated = true;
-    } else if (output.includes('h264_qsv')) {
-      detectedH264Encoder = 'h264_qsv';
-      encoderIsHardwareAccelerated = true;
-    } else if (output.includes('h264_videotoolbox') && process.platform === 'darwin') {
-      detectedH264Encoder = 'h264_videotoolbox';
-      encoderIsHardwareAccelerated = true;
-    } else if (output.includes('h264_vaapi')) {
-      detectedH264Encoder = 'h264_vaapi';
-      encoderIsHardwareAccelerated = true;
-    } else if (output.includes('h264_amf')) {
-      detectedH264Encoder = 'h264_amf';
-      encoderIsHardwareAccelerated = true;
-    } else {
-      detectedH264Encoder = 'libx264';
-      encoderIsHardwareAccelerated = false;
-    }
-  } catch (e) {
-    detectedH264Encoder = 'libx264';
-    encoderIsHardwareAccelerated = false;
-  }
-  console.log(`[Transcoder Engine] Active video encoder: ${detectedH264Encoder} (Hardware accelerated: ${encoderIsHardwareAccelerated})`);
-}
-detectBestEncoder();
-
-function getUniversalEncoderArgs(targetHeight, targetBitrate, maxRate, bufSize) {
-  const scaleFilter = `scale=-2:${targetHeight}`;
-  switch (detectedH264Encoder) {
-    case 'h264_nvenc':
-      return ['-c:v', 'h264_nvenc', '-preset', 'p1', '-tune', 'ull', '-b:v', targetBitrate, '-maxrate', maxRate, '-bufsize', bufSize, '-vf', scaleFilter, '-pix_fmt', 'yuv420p'];
-    case 'h264_qsv':
-      return ['-c:v', 'h264_qsv', '-preset', 'veryfast', '-b:v', targetBitrate, '-maxrate', maxRate, '-bufsize', bufSize, '-vf', scaleFilter, '-pix_fmt', 'yuv420p'];
-    case 'h264_videotoolbox':
-      return ['-c:v', 'h264_videotoolbox', '-b:v', targetBitrate, '-maxrate', maxRate, '-bufsize', bufSize, '-vf', scaleFilter, '-pix_fmt', 'yuv420p', '-prio_speed', '1'];
-    case 'h264_vaapi':
-      return ['-c:v', 'h264_vaapi', '-b:v', targetBitrate, '-maxrate', maxRate, '-bufsize', bufSize, '-vf', `format=nv12,hwupload,scale_vaapi=w=-2:h=${targetHeight}`];
-    case 'h264_amf':
-      return ['-c:v', 'h264_amf', '-usage', 'ultralowlatency', '-b:v', targetBitrate, '-maxrate', maxRate, '-bufsize', bufSize, '-vf', scaleFilter, '-pix_fmt', 'yuv420p'];
-    case 'libx264':
-    default:
-      return ['-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'zerolatency', '-threads', '0', '-b:v', targetBitrate, '-maxrate', maxRate, '-bufsize', bufSize, '-vf', scaleFilter, '-pix_fmt', 'yuv420p', '-bf', '0'];
-  }
-}
-
-// Default download folder on user's Mac: ~/Downloads/Svorrent
+// Default download folder: ~/Downloads/Svorrent
 const DOWNLOAD_DIR = path.join(os.homedir(), 'Downloads', 'Svorrent');
 function ensureDownloadDir() {
   if (!fs.existsSync(DOWNLOAD_DIR)) {
@@ -83,251 +24,26 @@ function ensureDownloadDir() {
   }
 }
 
-// Temporary streaming buffer cache — lives in macOS /tmp, auto-wiped on boot
-const STREAM_CACHE_DIR = path.join(os.tmpdir(), 'svorrent-cache');
-
-// App state (session, tracker cache) lives outside the download folder.
+// App data (session, tracker cache) lives in ~/.svorrent
 const DATA_DIR = path.join(os.homedir(), '.svorrent');
-
-// Extra trackers are applied client-wide to every non-private torrent (see
-// lib/trackers.js). Stale provider trackers are a major cause of slow starts.
 const TRACKERS = createTrackerList(DATA_DIR);
 
-// Pure in-memory container parser to detect exact movie duration from piece 0
-function extractMediaDuration(buffer) {
-  if (!buffer || buffer.length < 32) return null;
-
-  // 1. Matroska MKV/WebM parser (TimecodeScale 0x2A 0xD7 0xB1 and Duration 0x44 0x89)
-  let timecodeScale = 1000000;
-  for (let i = 0; i < Math.min(buffer.length - 8, 131072); i++) {
-    if (buffer[i] === 0x2A && buffer[i+1] === 0xD7 && buffer[i+2] === 0xB1) {
-      const len = buffer[i+3] & 0x7F;
-      if (len === 1) timecodeScale = buffer.readUInt8(i+4);
-      else if (len === 2) timecodeScale = buffer.readUInt16BE(i+4);
-      else if (len === 3) timecodeScale = (buffer.readUInt8(i+4) << 16) | buffer.readUInt16BE(i+5);
-      else if (len === 4) timecodeScale = buffer.readUInt32BE(i+4);
-    }
-    if (buffer[i] === 0x44 && buffer[i+1] === 0x89) {
-      const len = buffer[i+2] & 0x7F;
-      let rawDur = 0;
-      if (len === 4) rawDur = buffer.readFloatBE(i+3);
-      else if (len === 8) rawDur = buffer.readDoubleBE(i+3);
-      if (rawDur > 0) {
-        const durSec = rawDur * (timecodeScale / 1000000000);
-        if (durSec > 60 && durSec < 86400) return Math.round(durSec);
-      }
-    }
-  }
-
-  // 2. MP4 mvhd parser
-  const mvhdMarker = Buffer.from('mvhd');
-  const markerIdx = buffer.indexOf(mvhdMarker);
-  if (markerIdx >= 0 && markerIdx + 24 < buffer.length) {
-    const version = buffer.readUInt8(markerIdx + 4);
-    if (version === 0) {
-      const timescale = buffer.readUInt32BE(markerIdx + 16);
-      const duration = buffer.readUInt32BE(markerIdx + 20);
-      if (timescale > 0 && duration > 0) {
-        const sec = Math.round(duration / timescale);
-        if (sec > 60 && sec < 86400) return sec;
-      }
-    } else if (version === 1 && markerIdx + 32 < buffer.length) {
-      const timescale = buffer.readUInt32BE(markerIdx + 24);
-      const duration = Number(buffer.readBigUInt64BE(markerIdx + 28));
-      if (timescale > 0 && duration > 0) {
-        const sec = Math.round(duration / timescale);
-        if (sec > 60 && sec < 86400) return sec;
-      }
-    }
-  }
-
-  return null;
-}
-
-// Universal media duration probe for ANY video format (MKV, MP4, WebM, AVI, MOV, TS, etc.)
-// Probes piece 0 in RAM using in-memory container header parsing and fallback ffprobe pipe.
-function probeMediaDuration(torrent, file) {
-  if (!torrent || !file || torrent._detectedDuration || torrent._isProbingDuration) return;
-  torrent._isProbingDuration = true;
-
-  try {
-    const probeStream = file.createReadStream({
-      start: 0,
-      end: Math.min(file.length - 1, 8 * 1024 * 1024),
-    });
-
-    const chunks = [];
-    let finished = false;
-
-    probeStream.on('data', (chunk) => {
-      if (finished) return;
-      chunks.push(chunk);
-      // Fast check: immediate in-memory container header parse on early chunks
-      if (chunks.length <= 6) {
-        const quickBuf = Buffer.concat(chunks);
-        const quickDur = extractMediaDuration(quickBuf);
-        if (quickDur && quickDur > 10) {
-          torrent._detectedDuration = quickDur;
-          finished = true;
-          try { probeStream.destroy(); } catch (e) {}
-        }
-      }
-    });
-
-    const ffprobe = spawn(FFPROBE_BIN, [
-      '-v', 'error',
-      '-show_entries', 'format=duration',
-      '-of', 'default=noprint_wrappers=1:nokey=1',
-      '-i', 'pipe:0',
-    ]);
-
-    let output = '';
-    ffprobe.stdout.on('data', (d) => { output += d.toString(); });
-
-    const timeout = setTimeout(() => {
-      try { ffprobe.kill(); } catch (e) {}
-      if (!torrent._detectedDuration && chunks.length > 0) {
-        const fullBuf = Buffer.concat(chunks);
-        const dur = extractMediaDuration(fullBuf);
-        if (dur) torrent._detectedDuration = dur;
-      }
-    }, 4000);
-
-    ffprobe.on('close', () => {
-      clearTimeout(timeout);
-      const parsed = parseFloat(output.trim());
-      if (!isNaN(parsed) && parsed > 10 && parsed < 86400) {
-        torrent._detectedDuration = Math.round(parsed);
-      } else if (!torrent._detectedDuration && chunks.length > 0) {
-        const fullBuf = Buffer.concat(chunks);
-        const dur = extractMediaDuration(fullBuf);
-        if (dur) torrent._detectedDuration = dur;
-      }
-    });
-
-    ffprobe.on('error', () => {
-      clearTimeout(timeout);
-      if (!torrent._detectedDuration && chunks.length > 0) {
-        const fullBuf = Buffer.concat(chunks);
-        const dur = extractMediaDuration(fullBuf);
-        if (dur) torrent._detectedDuration = dur;
-      }
-    });
-
-    probeStream.pipe(ffprobe.stdin);
-    probeStream.on('error', () => {
-      try { ffprobe.kill(); } catch (e) {}
-    });
-  } catch (err) {
-    torrent._isProbingDuration = false;
-  }
-}
-
-// Dynamic Sliding Window Prefetch Engine
-// Focuses swarm bandwidth immediately ahead of the current playback position.
-// When player is paused, aggressively buffers 80 pieces ahead in RAM so pause becomes a buffering runway!
-function updatePrefetchWindow(torrent, file, byteOffset = 0) {
-  if (!torrent || !file || typeof torrent.select !== 'function') return;
-  const pieceLength = torrent.pieceLength;
-  if (!pieceLength || pieceLength <= 0) return;
-
-  const startPiece = file._startPiece;
-  const endPiece = file._endPiece;
-  if (typeof startPiece !== 'number' || typeof endPiece !== 'number') return;
-
-  const absoluteByte = Math.min(file.length - 1, Math.max(0, byteOffset)) + (file.offset || 0);
-  const currentPiece = Math.floor(absoluteByte / pieceLength);
-
-  const p0 = Math.max(startPiece, currentPiece);
-  // Maximize the pause buffering opportunity: buffer 50-80 pieces ahead in RAM when paused!
-  const isPaused = !!torrent._isPlayerPaused;
-  const pCriticalEnd = Math.min(endPiece, p0 + (isPaused ? 12 : 8));
-  const pRunwayEnd = Math.min(endPiece, p0 + (isPaused ? 45 : 25));
-  const pHorizonEnd = Math.min(endPiece, p0 + (isPaused ? 90 : 50));
-
-  try {
-    // Streaming needs bytes in order. Full downloads keep rarest-first, which
-    // is much faster overall; the critical window below still gets priority.
-    if (torrent._isStreamOnly) torrent.strategy = 'sequential';
-
-    // Deselect old pieces already consumed behind playback cursor (leave first 2 pieces for container headers)
-    if (torrent._isStreamOnly && currentPiece > startPiece + 12 && typeof torrent.deselect === 'function') {
-      const deselectStart = startPiece + 2;
-      const deselectEnd = currentPiece - 6;
-      if (deselectEnd > deselectStart) {
-        torrent.deselect(deselectStart, deselectEnd);
-      }
-    }
-
-    // Zone 1: Urgent immediate playback buffer - mark critical for multi-peer hotswap
-    if (typeof torrent.critical === 'function') {
-      torrent.critical(p0, pCriticalEnd);
-    }
-    torrent.select(p0, pCriticalEnd, 7);
-
-    // Zone 2: Safety buffer runway
-    if (pRunwayEnd > pCriticalEnd) {
-      torrent.select(pCriticalEnd, pRunwayEnd, 6);
-    }
-
-    // Zone 3: Background swarm saturation
-    if (pHorizonEnd > pRunwayEnd) {
-      torrent.select(pRunwayEnd, pHorizonEnd, 5);
-    }
-
-    // Always preserve the last 2 pieces of the file (MP4 moov atom / MKV cues / index tables)
-    if (endPiece > startPiece + 2) {
-      torrent.select(Math.max(startPiece, endPiece - 2), endPiece, 7);
-    }
-
-    // Ensure all peers are unchoked and downloading into RAM
-    if (torrent.wires) {
-      torrent.wires.forEach((wire) => {
-        try {
-          if (!wire.amInterested) wire.interested();
-        } catch (e) {}
-      });
-    }
-    try { torrent._drain(); } catch (e) {}
-  } catch (err) {
-    // Non-fatal if piece selection fails
-  }
-}
-
-// Clean old cache on startup (best-effort — locked files are skipped)
-function cleanStreamCache() {
-  try {
-    if (fs.existsSync(STREAM_CACHE_DIR)) {
-      fs.rmSync(STREAM_CACHE_DIR, { recursive: true, force: true });
-    }
-  } catch (e) {
-    // Directory may be locked; will be cleaned on next server restart
-  }
-  try {
-    fs.mkdirSync(STREAM_CACHE_DIR, { recursive: true });
-  } catch (e) {}
-}
-cleanStreamCache();
-
 // ---------------------------------------------------------------------------
-// BitTorrent engine
+// BitTorrent Engine Configuration
 // ---------------------------------------------------------------------------
 
-function isPortFree(port) {
+function isPortFree(testPort) {
   const tcp = new Promise((resolve) => {
     const srv = net.createServer().once('error', () => resolve(false));
-    srv.listen(port, () => srv.close(() => resolve(true)));
+    srv.listen(testPort, () => srv.close(() => resolve(true)));
   });
   const udp = new Promise((resolve) => {
     const sock = dgram.createSocket('udp4').once('error', () => resolve(false));
-    sock.bind(port, () => sock.close(() => resolve(true)));
+    sock.bind(testPort, () => sock.close(() => resolve(true)));
   });
   return Promise.all([tcp, udp]).then(([a, b]) => a && b);
 }
 
-// A fixed listening port lets UPnP/NAT-PMP keep a stable mapping, so other
-// peers can connect *to* us. Incoming connections are often the bulk of a
-// fast swarm; a random port per restart throws that away.
 async function pickPort(preferred) {
   for (let p = preferred; p < preferred + 10; p += 2) {
     if ((await isPortFree(p)) && (await isPortFree(p + 1))) return p;
@@ -336,17 +52,15 @@ async function pickPort(preferred) {
 }
 
 const TORRENT_PORT = await pickPort(Number(process.env.TORRENT_PORT) || 51413);
-const limit = (v) => (v ? Number(v) * 1024 : -1); // env values are KB/s
+const limit = (v) => (v ? Number(v) * 1024 : -1);
 
 const client = new WebTorrent({
-  // 1 = try protocol encryption first, fall back to plaintext. Reaches peers
-  // that *require* encryption and dodges ISP throttling of plain BitTorrent.
-  secure: 1,
-  maxConns: Number(process.env.MAX_CONNS) || 200, // per torrent
-  torrentPort: TORRENT_PORT,          // TCP + uTP
+  secure: 1, // Protocol Encryption (PE) with plaintext fallback
+  maxConns: Number(process.env.MAX_CONNS) || 200,
+  torrentPort: TORRENT_PORT,
   dhtPort: TORRENT_PORT ? TORRENT_PORT + 1 : 0,
   dht: true,
-  lsd: true,                          // find peers on the local network
+  lsd: true,
   utp: true,
   natUpnp: true,
   natPmp: true,
@@ -360,13 +74,16 @@ client.on('listening', () => {
   console.log(`[engine] listening on port ${client.torrentPort} (TCP/uTP), DHT on ${client.dhtPort}`);
 });
 if (!Wire.nativeRC4) {
-  console.warn('[engine] Native RC4 unavailable; encrypted peers use a slower JS cipher. Start with `npm start` (adds --openssl-legacy-provider).');
+  console.warn('[engine] Native RC4 unavailable; start with `npm start` (--openssl-legacy-provider) for max speed.');
 }
+
+// ---------------------------------------------------------------------------
+// Session Persistence
+// ---------------------------------------------------------------------------
 
 const session = createSession(DATA_DIR);
 const saveSession = () => session.save(client.torrents);
 
-// Periodic session auto-save
 setInterval(() => {
   saveSession();
 }, 20 * 1000).unref();
@@ -396,8 +113,6 @@ async function restoreSession() {
       const torrent = client.add(source, addOpts);
       if (torrent) {
         torrent._isPermanentDownload = true;
-        torrent._isStreamOnly = false;
-        torrent._diskBacked = true;
         torrent._addedAt = entry.addedAt || Date.now();
         if (entry.paused) {
           torrent.paused = true;
@@ -406,94 +121,38 @@ async function restoreSession() {
         setupTorrentHooks(torrent);
       }
     } catch (err) {
-      console.warn(`[session] Could not restore ${entry.name || entry.infoHash}:`, err.message);
+      console.warn(`[session] Failed to restore ${entry.name || entry.infoHash}:`, err.message);
     }
   }
 }
 
-// Guard against unhandled torrent errors crashing the server process
-process.on('uncaughtException', (err) => {
-  console.error('Uncaught Exception:', err.message);
-});
-process.on('unhandledRejection', (reason) => {
-  console.error('Unhandled Rejection:', reason);
-});
+// Process lifecycle guards
+process.on('uncaughtException', (err) => console.error('Uncaught Exception:', err.message));
+process.on('unhandledRejection', (reason) => console.error('Unhandled Rejection:', reason));
 
-// Graceful shutdown: destroy all torrents and wipe stream cache
 async function shutdownCleanup() {
-  console.log('\nSvorrent shutting down — saving session and wiping stream cache...');
+  console.log('\nSvorrent shutting down — saving session state...');
   saveSession();
   try {
     await new Promise((resolve) => client.destroy(resolve));
   } catch (e) {}
-  cleanStreamCache();
   process.exit(0);
 }
 process.on('SIGINT', shutdownCleanup);
 process.on('SIGTERM', shutdownCleanup);
 
-// Periodic cleanup: remove stream-only torrents that have been seeding > 2h
-// (Keeps memory + disk from accumulating during a long session)
-setInterval(() => {
-  const now = Date.now();
-  client.torrents.forEach((t) => {
-    if (t._isStreamOnly && t._addedAt && (now - t._addedAt) > 2 * 60 * 60 * 1000) {
-      console.log(`Auto-removing stale stream torrent: ${t.name}`);
-      t.destroy({ destroyStore: true }, () => {});
-    }
-  });
-}, 30 * 60 * 1000); // Check every 30 minutes
-
 app.use(cors());
 app.use(express.json());
 
-// Enable working public providers
+// Enable working public search indexers
 TorrentSearchApi.disableAllProviders();
 TorrentSearchApi.enableProvider('ThePirateBay');
 TorrentSearchApi.enableProvider('Limetorrents');
 TorrentSearchApi.enableProvider('TorrentProject');
 
-// Search endpoint
-app.get('/api/search', async (req, res) => {
-  const query = req.query.q;
-  if (!query) {
-    return res.status(400).json({ error: 'Search query is required' });
-  }
-
-  try {
-    const torrents = await TorrentSearchApi.search(query, 'All', 30);
-    // Sort by seeds descending
-    const sorted = (torrents || []).sort((a, b) => (parseInt(b.seeds) || 0) - (parseInt(a.seeds) || 0));
-    res.json(sorted);
-  } catch (error) {
-    console.error('Search error:', error);
-    res.status(500).json({ error: 'Failed to search torrents' });
-  }
-});
-
-// Resolve Magnet endpoint
-app.get('/api/magnet', async (req, res) => {
-  const { provider, desc, link, magnet } = req.query;
-
-  if (magnet) {
-    return res.json({ magnet });
-  }
-
-  if (!provider) {
-    return res.status(400).json({ error: 'Provider is required to resolve magnet' });
-  }
-
-  try {
-    const resolvedMagnet = await TorrentSearchApi.getMagnet({ provider, desc, link });
-    if (!resolvedMagnet) {
-      return res.status(404).json({ error: 'Magnet link could not be found' });
-    }
-    res.json({ magnet: resolvedMagnet });
-  } catch (err) {
-    console.error('Magnet resolution error:', err);
-    res.status(500).json({ error: 'Failed to resolve magnet: ' + err.message });
-  }
-});
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 function cleanMagnet(uri) {
   if (!uri) return '';
@@ -542,8 +201,7 @@ function setupTorrentHooks(torrent) {
     console.error(`[torrent error] [${torrent.name || torrent.infoHash}]:`, err.message);
   });
 
-  // Fast Ramp-Up: as soon as a peer connects, unchoke and show interest
-  // so piece requests begin flowing immediately without waiting for rechoke cycles
+  // Fast Ramp-Up: immediately unchoke and signal interest on connection
   torrent.on('wire', (wire) => {
     try {
       if (typeof wire.unchoke === 'function') wire.unchoke();
@@ -552,25 +210,18 @@ function setupTorrentHooks(torrent) {
   });
 
   torrent.once('ready', () => {
-    if (torrent._isPermanentDownload) {
-      // Swarm Rarest-First Strategy (BEP 3):
-      // Downloads rarest pieces first so peers reciprocate with maximum unchoked upload bandwidth
-      torrent.strategy = 'rarest';
-
-      // Select entire torrent range across all files with full priority
-      // allowing all connected swarm peers to supply pieces simultaneously
-      if (torrent.pieces && torrent.pieces.length > 0) {
-        torrent.select(0, torrent.pieces.length - 1);
-      }
-
-      if (torrent.wires) {
-        torrent.wires.forEach((w) => {
-          try {
-            w.unchoke();
-            w.interested();
-          } catch (e) {}
-        });
-      }
+    // Swarm Rarest-First Strategy: maximum peer reciprocation and throughput
+    torrent.strategy = 'rarest';
+    if (torrent.pieces && torrent.pieces.length > 0) {
+      torrent.select(0, torrent.pieces.length - 1);
+    }
+    if (torrent.wires) {
+      torrent.wires.forEach((w) => {
+        try {
+          w.unchoke();
+          w.interested();
+        } catch (e) {}
+      });
     }
     saveSession();
   });
@@ -581,49 +232,15 @@ function setupTorrentHooks(torrent) {
   });
 }
 
-// Helper to get or add torrent
 async function getOrAddTorrent(magnetURI, opts = {}) {
   magnetURI = cleanMagnet(magnetURI);
   const targetInfoHash = extractInfoHash(magnetURI);
   magnetURI = enrichMagnetWithTrackers(magnetURI);
   let torrent = targetInfoHash ? await client.get(targetInfoHash) : await client.get(magnetURI);
 
-  // Clean truly idle stream torrents (idle > 30 mins with zero active streams)
-  const now = Date.now();
-  client.torrents.forEach((t) => {
-    const hasStreams = (t._activeStreams || 0) > 0;
-    if (!hasStreams && t._isStreamOnly && t._addedAt && (now - t._addedAt) > 30 * 60 * 1000) {
-      try {
-        console.log(`[Stream Purge] Cleaning idle stream torrent ${t.name || t.infoHash}`);
-        client.remove(t.infoHash, { destroyStore: true });
-      } catch (e) {}
-    }
-  });
-
-  if (torrent && opts.isPermanentDownload) {
-    const needsDiskStore = torrent._isStreamOnly ||
-      torrent._diskBacked !== true ||
-      torrent.path !== DOWNLOAD_DIR;
-    if (needsDiskStore) {
-      await new Promise((resolve) => {
-        try {
-          client.remove(torrent, { destroyStore: false }, resolve);
-        } catch (err) {
-          console.warn('Could not release in-memory stream torrent:', err.message);
-          resolve();
-        }
-      });
-      torrent = null;
-    }
-  }
-
   if (!torrent) {
-    const isPermanent = opts.isPermanentDownload === true || (!opts.isStreamOnly && opts.path === DOWNLOAD_DIR);
-
-    if (isPermanent) ensureDownloadDir();
-    const addOpts = isPermanent
-      ? { path: opts.path || DOWNLOAD_DIR }
-      : { store: MemoryChunkStore };
+    ensureDownloadDir();
+    const addOpts = { path: opts.path || DOWNLOAD_DIR };
 
     try {
       torrent = client.add(magnetURI, addOpts);
@@ -637,22 +254,63 @@ async function getOrAddTorrent(magnetURI, opts = {}) {
     }
 
     if (torrent) {
-      torrent._isPermanentDownload = isPermanent;
-      torrent._isStreamOnly = !isPermanent;
-      torrent._diskBacked = isPermanent;
+      torrent._isPermanentDownload = true;
       torrent._addedAt = Date.now();
       setupTorrentHooks(torrent);
     }
-  } else if (opts.isPermanentDownload && torrent) {
+  } else {
     torrent._isPermanentDownload = true;
-    torrent._isStreamOnly = false;
-    torrent._diskBacked = true;
     setupTorrentHooks(torrent);
   }
   return torrent;
 }
 
-// Start download to local disk
+// ---------------------------------------------------------------------------
+// API Routes
+// ---------------------------------------------------------------------------
+
+// 1. Search indexers
+app.get('/api/search', async (req, res) => {
+  const query = req.query.q;
+  if (!query) {
+    return res.status(400).json({ error: 'Search query is required' });
+  }
+
+  try {
+    const torrents = await TorrentSearchApi.search(query, 'All', 30);
+    const sorted = (torrents || []).sort((a, b) => (parseInt(b.seeds, 10) || 0) - (parseInt(a.seeds, 10) || 0));
+    res.json(sorted);
+  } catch (error) {
+    console.error('Search error:', error);
+    res.status(500).json({ error: 'Failed to search torrents' });
+  }
+});
+
+// 2. Resolve magnet link
+app.get('/api/magnet', async (req, res) => {
+  const { provider, desc, link, magnet } = req.query;
+
+  if (magnet) {
+    return res.json({ magnet });
+  }
+
+  if (!provider) {
+    return res.status(400).json({ error: 'Provider is required to resolve magnet' });
+  }
+
+  try {
+    const resolvedMagnet = await TorrentSearchApi.getMagnet({ provider, desc, link });
+    if (!resolvedMagnet) {
+      return res.status(404).json({ error: 'Magnet link could not be found' });
+    }
+    res.json({ magnet: resolvedMagnet });
+  } catch (err) {
+    console.error('Magnet resolution error:', err);
+    res.status(500).json({ error: 'Failed to resolve magnet: ' + err.message });
+  }
+});
+
+// 3. Add & start download to disk
 app.post('/api/torrent/download', async (req, res) => {
   let { magnet, provider, desc, link } = req.body;
 
@@ -669,7 +327,7 @@ app.post('/api/torrent/download', async (req, res) => {
   }
 
   try {
-    const torrent = await getOrAddTorrent(magnet, { path: DOWNLOAD_DIR, isPermanentDownload: true });
+    const torrent = await getOrAddTorrent(magnet, { path: DOWNLOAD_DIR });
     res.json({
       success: true,
       infoHash: torrent.infoHash,
@@ -681,14 +339,9 @@ app.post('/api/torrent/download', async (req, res) => {
   }
 });
 
-// List all active user downloads (strictly excludes temporary stream cache buffers)
+// 4. List all downloads
 app.get('/api/torrents', (req, res) => {
-  const includeStreams = req.query.includeStreams === 'true';
-  const targetTorrents = includeStreams
-    ? client.torrents
-    : client.torrents.filter((t) => !!t._isPermanentDownload);
-
-  const list = targetTorrents.map((t) => {
+  const list = client.torrents.map((t) => {
     const largestFile = t.files && t.files.length > 0
       ? t.files.reduce((a, b) => (a.length > b.length ? a : b))
       : null;
@@ -712,52 +365,34 @@ app.get('/api/torrents', (req, res) => {
       timeRemaining: isPaused ? Infinity : (t.timeRemaining || 0),
       fileName: largestFile ? largestFile.name : null,
       filesCount: t.files ? t.files.length : 0,
-      isPermanentDownload: !!t._isPermanentDownload,
-      isStreamOnly: !!t._isStreamOnly,
     };
   });
   res.json(list);
 });
 
-// Deep "Nerd Stats" Inspector endpoint
+// 5. Details inspector (files, peers, piece map, trackers)
 app.get('/api/torrent/:id/nerd-stats', async (req, res) => {
-  const id = req.params.id;
-  const torrent = await client.get(id);
-
+  const torrent = await client.get(req.params.id);
   if (!torrent) {
     return res.status(404).json({ error: 'Torrent not found' });
   }
 
-  // 1. Peer wires breakdown
   const peers = (torrent.wires || []).map((wire) => {
     let clientName = 'Unknown Client';
-    if (wire.peerExtendedHandshake && wire.peerExtendedHandshake.v) {
+    if (wire.peerExtendedHandshake?.v) {
       const v = wire.peerExtendedHandshake.v;
-      if (typeof v === 'string') {
-        clientName = v;
-      } else if (Buffer.isBuffer(v)) {
-        clientName = v.toString('utf8');
-      } else if (typeof v === 'object') {
-        try {
-          clientName = Buffer.from(Object.values(v)).toString('utf8');
-        } catch (e) {
-          clientName = 'Unknown Client';
-        }
-      }
+      clientName = typeof v === 'string' ? v : Buffer.isBuffer(v) ? v.toString('utf8') : String(v);
     } else if (wire.peerId) {
       try {
         const parsed = peerid(wire.peerId);
-        if (parsed && parsed.client) {
+        if (parsed?.client) {
           clientName = `${parsed.client} ${parsed.version || ''}`.trim();
         }
       } catch (e) {}
     }
-    if (typeof clientName !== 'string') {
-      clientName = String(clientName);
-    }
 
     let peerProgress = 0;
-    if (wire.peerPieces && torrent.pieces && torrent.pieces.length > 0) {
+    if (wire.peerPieces && torrent.pieces?.length > 0) {
       let piecesHave = 0;
       for (let i = 0; i < torrent.pieces.length; i++) {
         if (wire.peerPieces.get(i)) piecesHave++;
@@ -768,7 +403,7 @@ app.get('/api/torrent/:id/nerd-stats', async (req, res) => {
     return {
       ip: wire.remoteAddress || '127.0.0.1',
       port: wire.remotePort || 0,
-      client: clientName,
+      client: String(clientName),
       type: wire.type || 'tcp',
       downloadSpeed: typeof wire.downloadSpeed === 'function' ? wire.downloadSpeed() : 0,
       uploadSpeed: typeof wire.uploadSpeed === 'function' ? wire.uploadSpeed() : 0,
@@ -776,13 +411,10 @@ app.get('/api/torrent/:id/nerd-stats', async (req, res) => {
       uploaded: wire.uploaded || 0,
       choked: !!wire.peerChoking,
       interested: !!wire.peerInterested,
-      amChoking: !!wire.amChoking,
-      amInterested: !!wire.amInterested,
       progress: peerProgress,
     };
   });
 
-  // 2. Piece Map / Bitfield stats
   let pieceStats = {
     total: torrent.pieces ? torrent.pieces.length : 0,
     pieceLength: torrent.pieceLength || 0,
@@ -797,7 +429,6 @@ app.get('/api/torrent/:id/nerd-stats', async (req, res) => {
       if (torrent.bitfield.get(i)) verifiedCount++;
     }
 
-    // Sample up to 240 blocks for visual piece grid display
     const blocksCount = Math.min(total, 240);
     const step = total / blocksCount;
     const grid = [];
@@ -816,7 +447,6 @@ app.get('/api/torrent/:id/nerd-stats', async (req, res) => {
     };
   }
 
-  // 3. Trackers
   const announceUrls = torrent.announce || [];
   const trackerList = announceUrls.map((url) => ({
     url,
@@ -825,10 +455,8 @@ app.get('/api/torrent/:id/nerd-stats', async (req, res) => {
     peers: torrent.wires ? torrent.wires.length : 0,
   }));
 
-  // 4. DHT nodes count
   const dhtNodes = client.dht?._rpc?.nodes?.toArray?.()?.length ?? client.dht?._rpc?.nodes?.length ?? 0;
 
-  // 5. Files list with full details
   const files = (torrent.files || []).map((f) => ({
     name: f.name,
     path: f.path,
@@ -841,7 +469,7 @@ app.get('/api/torrent/:id/nerd-stats', async (req, res) => {
   const isPaused = !!(torrent.paused || torrent._pausedManually);
   res.json({
     infoHash: torrent.infoHash,
-    name: torrent.name || 'Resolving metadata from swarm...',
+    name: torrent.name || 'Resolving metadata...',
     ready: !!torrent.ready,
     done: !!torrent.done,
     paused: isPaused,
@@ -861,22 +489,17 @@ app.get('/api/torrent/:id/nerd-stats', async (req, res) => {
   });
 });
 
-// Pause torrent
+// 6. Pause torrent
 app.post('/api/torrent/:id/pause', async (req, res) => {
   const torrent = await client.get(req.params.id);
   if (!torrent) return res.status(404).json({ error: 'Torrent not found' });
-  
+
   torrent.paused = true;
   torrent._pausedManually = true;
 
   try {
     if (torrent.pieces && torrent.pieces.length > 0) {
       torrent.deselect(0, torrent.pieces.length - 1, false);
-    }
-    if (torrent.files) {
-      torrent.files.forEach((f) => {
-        try { f.deselect(); } catch (e) {}
-      });
     }
   } catch (e) {}
 
@@ -891,7 +514,7 @@ app.post('/api/torrent/:id/pause', async (req, res) => {
   res.json({ success: true, paused: true });
 });
 
-// Resume torrent
+// 7. Resume torrent
 app.post('/api/torrent/:id/resume', async (req, res) => {
   const torrent = await client.get(req.params.id);
   if (!torrent) return res.status(404).json({ error: 'Torrent not found' });
@@ -900,11 +523,6 @@ app.post('/api/torrent/:id/resume', async (req, res) => {
   torrent._pausedManually = false;
 
   try {
-    if (torrent.files) {
-      torrent.files.forEach((f) => {
-        try { f.select(); } catch (e) {}
-      });
-    }
     if (torrent.pieces && torrent.pieces.length > 0) {
       torrent.select(0, torrent.pieces.length - 1, false);
     }
@@ -922,7 +540,7 @@ app.post('/api/torrent/:id/resume', async (req, res) => {
   res.json({ success: true, paused: false });
 });
 
-// Delete torrent
+// 8. Delete torrent
 app.post('/api/torrent/:id/delete', async (req, res) => {
   const torrent = await client.get(req.params.id);
   if (!torrent) return res.status(404).json({ error: 'Torrent not found' });
@@ -933,16 +551,12 @@ app.post('/api/torrent/:id/delete', async (req, res) => {
   });
 });
 
-// Reveal in macOS Finder / Windows File Explorer
+// 9. Reveal in Finder / File Explorer
 app.post('/api/torrent/:id/open-finder', async (req, res) => {
   const torrent = await client.get(req.params.id);
   ensureDownloadDir();
 
-  // Permanent downloads belong in DOWNLOAD_DIR. Stream-only torrents may
-  // point at a temporary in-memory/cache location, so never reveal that path.
-  const configuredPath = torrent && torrent._isPermanentDownload && torrent.path
-    ? torrent.path
-    : DOWNLOAD_DIR;
+  const configuredPath = torrent?.path ? torrent.path : DOWNLOAD_DIR;
   const basePath = fs.existsSync(configuredPath) ? configuredPath : DOWNLOAD_DIR;
   const largestFile = torrent?.files?.length
     ? torrent.files.reduce((a, b) => (a.length > b.length ? a : b))
@@ -956,8 +570,6 @@ app.post('/api/torrent/:id/open-finder', async (req, res) => {
   };
 
   if (process.platform === 'darwin') {
-    // Reveal the actual partial file when available; otherwise open the
-    // configured folder so Finder still lands somewhere useful.
     return spawn('open', targetFile ? ['-R', targetFile] : [basePath]).on('error', onOpen).on('close', (code) => {
       if (code !== 0) return onOpen(new Error('Finder could not open the download location'));
       onOpen(null);
@@ -970,949 +582,9 @@ app.post('/api/torrent/:id/open-finder', async (req, res) => {
   exec(cmd, onOpen);
 });
 
-function getMimeType(filename) {
-  const ext = filename.split('.').pop().toLowerCase();
-  const mimeTypes = {
-    mp4: 'video/mp4',
-    m4v: 'video/mp4',
-    mkv: 'video/x-matroska',
-    webm: 'video/webm',
-    avi: 'video/x-msvideo',
-    mov: 'video/quicktime',
-    mp3: 'audio/mpeg',
-    flac: 'audio/flac',
-    wav: 'audio/wav',
-    iso: 'application/x-iso9660-image',
-    zip: 'application/zip',
-    tar: 'application/x-tar',
-    gz: 'application/gzip',
-  };
-  return mimeTypes[ext] || 'application/octet-stream';
-}
-
-// Dedicated clean direct stream endpoint for VLC / IINA / native players
-app.get('/api/torrent/:id/stream', async (req, res) => {
-  let magnetURI = req.query.magnet;
-  let torrent = await client.get(req.params.id);
-
-  if (!torrent && magnetURI) {
-    torrent = await getOrAddTorrent(magnetURI, { isStreamOnly: true });
-  }
-  if (!torrent) {
-    torrent = client.torrents.find((t) => t.infoHash === req.params.id || (magnetURI && t.magnetURI === magnetURI));
-  }
-  if (!torrent) {
-    return res.status(404).send('Torrent not found in swarm');
-  }
-
-  const swarmTimeout = setTimeout(() => {
-    if (!res.headersSent) {
-      res.status(504).send('Swarm timeout waiting for metadata');
-    }
-  }, 35000);
-
-  if (torrent.ready) {
-    startServingStream();
-  } else {
-    torrent.once('ready', startServingStream);
-  }
-
-  function startServingStream() {
-    clearTimeout(swarmTimeout);
-    if (res.headersSent) return;
-
-    if (!torrent.files || torrent.files.length === 0) {
-      return res.status(404).send('No files found in torrent');
-    }
-
-    const file = torrent.files.reduce((a, b) => (a.length > b.length ? a : b));
-    const mimeType = getMimeType(file.name);
-
-    // Focus bandwidth on this file & sliding window
-    try {
-      torrent.files.forEach((f) => {
-        if (f !== file && typeof f.deselect === 'function') f.deselect();
-      });
-      if (typeof file.select === 'function') file.select();
-    } catch (e) {}
-
-    const corsHeaders = {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Headers': 'Range, Content-Type, Accept',
-      'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges',
-    };
-
-    const range = req.headers.range;
-    if (range) {
-      const parts = range.replace(/bytes=/, '').split('-');
-      const start = parseInt(parts[0], 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : file.length - 1;
-      const chunksize = end - start + 1;
-
-      // Update sliding-window prefetcher to pull 50 pieces ahead of this byte offset
-      updatePrefetchWindow(torrent, file, start);
-
-      const head = {
-        'Content-Range': `bytes ${start}-${end}/${file.length}`,
-        'Accept-Ranges': 'bytes',
-        'Content-Length': chunksize,
-        'Content-Type': mimeType,
-        ...corsHeaders,
-      };
-
-      res.writeHead(206, head);
-      if (req.method === 'HEAD') return res.end();
-      const stream = file.createReadStream({ start, end });
-      stream.on('error', () => {});
-      stream.pipe(res);
-      req.on('close', () => { try { stream.destroy(); } catch (e) {} });
-    } else {
-      updatePrefetchWindow(torrent, file, 0);
-      const head = {
-        'Content-Length': file.length,
-        'Content-Type': mimeType,
-        'Accept-Ranges': 'bytes',
-        'Content-Disposition': `inline; filename="${encodeURIComponent(file.name)}"`,
-        ...corsHeaders,
-      };
-      res.writeHead(200, head);
-      if (req.method === 'HEAD') return res.end();
-      const stream = file.createReadStream();
-      stream.on('error', () => {});
-      stream.pipe(res);
-      req.on('close', () => { try { stream.destroy(); } catch (e) {} });
-    }
-  }
-});
-
-// Open File or Live Stream in native player (VLC / IINA / Windows Media Player / MPC-HC)
-app.post('/api/torrent/:id/play-native', async (req, res) => {
-  let magnetURI = req.body?.magnet || req.query?.magnet;
-  let torrent = await client.get(req.params.id);
-
-  if (!torrent && magnetURI) {
-    torrent = await getOrAddTorrent(magnetURI, { isStreamOnly: true });
-  }
-
-  if (!torrent) {
-    torrent = client.torrents.find(
-      (t) => t.infoHash === req.params.id || (magnetURI && t.magnetURI === magnetURI)
-    );
-  }
-
-  if (!torrent) {
-    return res.status(404).json({ error: 'Torrent not found in swarm' });
-  }
-
-  const mediaFiles = torrent.files
-    ? torrent.files.filter((f) => /\.(mp4|m4v|webm|mkv|avi|mov|ts|m2ts)$/i.test(f.name))
-    : [];
-  const largestFile = mediaFiles.length > 0
-    ? mediaFiles.reduce((a, b) => (a.length > b.length ? a : b))
-    : torrent.files && torrent.files.length > 0
-      ? torrent.files.reduce((a, b) => (a.length > b.length ? a : b))
-      : null;
-
-  // Stream-only torrents live in RAM. Never derive a native-player path from
-  // torrent.path: stale cache paths make VLC try to open deleted files.
-  const fullPath = !torrent._isStreamOnly && largestFile
-    ? path.join(torrent.path || DOWNLOAD_DIR, largestFile.path)
-    : null;
-  const fileExistsOnDisk = fullPath && fs.existsSync(fullPath) && fs.statSync(fullPath).size > 1048576;
-
-  let targetUrlOrPath = '';
-  let streamModeUsed = false;
-
-  if (fileExistsOnDisk) {
-    targetUrlOrPath = fullPath;
-  } else {
-    streamModeUsed = true;
-    // The torrent is already registered above, so VLC only needs the short
-    // stream URL. Avoid embedding the full magnet (and its encoded trackers)
-    // in the MRL; some VLC builds reject that very long URL.
-    targetUrlOrPath = `http://localhost:3001/api/torrent/${torrent.infoHash}/stream`;
-  }
-
-  // Build platform-specific launcher with VLC / IINA auto-activation & instant play
-  let cmd = '';
-  let playerName = 'Default Media Player';
-
-  if (process.platform === 'darwin') {
-    if (fs.existsSync('/Applications/IINA.app')) {
-      cmd = `open -a "/Applications/IINA.app" "${targetUrlOrPath}"`;
-      playerName = 'IINA';
-    } else if (fs.existsSync('/Applications/VLC.app')) {
-      // VLC's OpenURL AppleScript verb is unreliable and can turn a local
-      // HTTP URL into a bogus :554 MRL. Let macOS pass the URL directly to
-      // VLC, which handles HTTP range requests correctly.
-      // Launch VLC's executable directly so the URL is opened and played,
-      // instead of being merely queued by an already-running VLC instance.
-      cmd = `"/Applications/VLC.app/Contents/MacOS/VLC" "${targetUrlOrPath}" >/dev/null 2>&1 &`;
-      playerName = 'VLC Media Player';
-    } else {
-      cmd = `open -a VLC "${targetUrlOrPath}" 2>/dev/null || open "${targetUrlOrPath}"`;
-      playerName = 'VLC / Default Player';
-    }
-  } else if (process.platform === 'win32') {
-    const vlc64 = 'C:\\Program Files\\VideoLAN\\VLC\\vlc.exe';
-    const vlc32 = 'C:\\Program Files (x86)\\VideoLAN\\VLC\\vlc.exe';
-    if (fs.existsSync(vlc64)) {
-      cmd = `"${vlc64}" "${targetUrlOrPath}"`;
-      playerName = 'VLC Media Player';
-    } else if (fs.existsSync(vlc32)) {
-      cmd = `"${vlc32}" "${targetUrlOrPath}"`;
-      playerName = 'VLC Media Player';
-    } else {
-      cmd = `start "" "${targetUrlOrPath}"`;
-      playerName = 'Default Windows Player';
-    }
-  } else {
-    cmd = `vlc "${targetUrlOrPath}" 2>/dev/null || xdg-open "${targetUrlOrPath}"`;
-    playerName = 'VLC';
-  }
-
-  exec(cmd, (err) => {
-    if (err) {
-      console.error('Play native error:', err);
-      const fallbackCmd = process.platform === 'darwin' ? `open "${targetUrlOrPath}"` : `xdg-open "${targetUrlOrPath}"`;
-      exec(fallbackCmd, (fbErr) => {
-        if (fbErr) {
-          return res.status(500).json({ error: `Could not launch player: ${err.message}` });
-        }
-        res.json({ success: true, target: targetUrlOrPath, player: playerName, streamMode: streamModeUsed });
-      });
-      return;
-    }
-    res.json({ success: true, target: targetUrlOrPath, player: playerName, streamMode: streamModeUsed });
-  });
-});
-
-// Downloadable M3U stream playlist for any desktop player
-app.get('/api/torrent/:id/playlist.m3u', async (req, res) => {
-  let magnetURI = req.query.magnet;
-  let torrent = await client.get(req.params.id);
-  if (!torrent && magnetURI) {
-    torrent = await getOrAddTorrent(magnetURI, { isStreamOnly: true });
-  }
-
-  const effectiveMagnet = torrent?.magnetURI || magnetURI;
-  if (!effectiveMagnet) return res.status(400).send('Magnet required');
-
-  const title = cleanMovieTitle(torrent?.name || req.query.title || 'Svorrent Stream');
-  const streamUrl = `http://localhost:3001/api/torrent/${torrent?.infoHash || req.params.id}/stream`;
-  const m3u = `#EXTM3U\n#EXTINF:-1,${title} [Svorrent Stream]\n${streamUrl}\n`;
-
-  res.setHeader('Content-Type', 'audio/x-mpegurl');
-  res.setHeader('Content-Disposition', `attachment; filename="${title.replace(/[^a-zA-Z0-9_-]/g, '_')}.m3u"`);
-  res.send(m3u);
-});
-
-function cleanMovieTitle(raw) {
-  if (!raw) return '';
-  let name = raw.replace(/\.(mkv|mp4|avi|webm)$/i, '');
-  name = name.replace(/\[.*?\]/g, '').replace(/\(.*?\)/g, '');
-  const match = name.match(/^(.*?)(?:[.\s_-]+(?:(?:19|20)\d{2}|480p|720p|1080p|2160p|4k|uhd|remux|bluray|web-?dl|hdr|dts))/i);
-  let cleaned = match ? match[1] : name;
-  cleaned = cleaned.replace(/[._]/g, ' ').trim();
-  return cleaned || name;
-}
-
-// Quick status endpoint for cinema player with piece buffer telemetry
-app.get('/api/torrent/status', async (req, res) => {
-  let magnetURI = req.query.magnet;
-  const { provider, desc, link } = req.query;
-
-  if (!magnetURI && provider && (desc || link)) {
-    try {
-      magnetURI = await TorrentSearchApi.getMagnet({ provider, desc, link });
-    } catch (err) {
-      return res.status(400).json({ error: 'Could not resolve magnet: ' + err.message });
-    }
-  }
-
-  if (!magnetURI) {
-    return res.status(400).json({ error: 'Magnet URI or provider details required' });
-  }
-
-  let torrent = await getOrAddTorrent(magnetURI, { isStreamOnly: true });
-  if (!torrent) {
-    return res.status(404).json({ error: 'Could not resolve torrent from swarm' });
-  }
-
-  const clientCurrentTime = Math.max(0, parseFloat(req.query.currentTime) || 0);
-  const isPaused = req.query.paused === 'true';
-  torrent._isPlayerPaused = isPaused;
-
-  const files = torrent.files ? torrent.files.map((f) => ({ name: f.name, length: f.length })) : [];
-  const mediaFiles = torrent.files
-    ? torrent.files.filter((f) => /\.(mp4|m4v|webm|mkv|avi|mov|ts|m2ts)$/i.test(f.name))
-    : [];
-  const largestFile = mediaFiles.length > 0
-    ? mediaFiles.reduce((a, b) => (a.length > b.length ? a : b))
-    : torrent.files && torrent.files.length > 0
-      ? torrent.files.reduce((a, b) => (a.length > b.length ? a : b))
-      : null;
-
-  const subtitleFiles = torrent.files
-    ? torrent.files
-        .map((f, idx) => ({ index: idx, name: f.name, length: f.length }))
-        .filter((f) => /\.(srt|vtt|sub|ass)$/i.test(f.name))
-    : [];
-
-  const pieceLength = torrent.pieceLength || 0;
-  const startPiece = largestFile ? largestFile._startPiece : 0;
-
-  // hasFirstPiece means that the bytes needed to start the selected media file
-  // are actually available. `torrent.ready` only means that metadata arrived;
-  // treating it as playable makes the browser request an empty stream when the
-  // swarm has not supplied any data yet.
-  let hasFirstPiece = false;
-  if (torrent.bitfield && typeof torrent.bitfield.get === 'function') {
-    hasFirstPiece = !!torrent.bitfield.get(startPiece);
-  }
-  if (!hasFirstPiece && pieceLength > 0 && (torrent.downloaded || 0) >= pieceLength) {
-    hasFirstPiece = true; // downloaded >= 1 piece → piece 0 must be in memory
-  }
-
-  // Trigger universal media duration probe for ANY video format once piece 0 is in memory
-  if (hasFirstPiece && largestFile) {
-    probeMediaDuration(torrent, largestFile);
-  }
-
-  const durationSec = torrent._detectedDuration || null;
-
-  // Calculate current playback byte offset and playhead piece
-  let byteOffset = 0;
-  if (durationSec > 0 && clientCurrentTime > 0 && largestFile && largestFile.length > 0) {
-    byteOffset = Math.min(largestFile.length - 1, (clientCurrentTime / durationSec) * largestFile.length);
-  }
-
-  // Dynamic sliding window prefetch: focuses swarm bandwidth ahead of the current playhead
-  if (largestFile && typeof torrent.select === 'function') {
-    updatePrefetchWindow(torrent, largestFile, byteOffset);
-  }
-
-  const playheadPiece = (largestFile && pieceLength > 0)
-    ? Math.max(startPiece, Math.floor(((largestFile.offset || 0) + byteOffset) / pieceLength))
-    : startPiece;
-
-  // Calculate contiguous buffer runway from current playhead forward
-  let runwayPiecesReady = 0;
-  if (largestFile && pieceLength > 0) {
-    const endP = largestFile._endPiece || startPiece;
-    const maxCheck = Math.min(endP, playheadPiece + 80);
-    for (let p = playheadPiece; p <= maxCheck; p++) {
-      let pieceDone = false;
-      if (torrent.bitfield && typeof torrent.bitfield.get === 'function') {
-        pieceDone = !!torrent.bitfield.get(p);
-      }
-      if (!pieceDone && (torrent.downloaded || 0) >= (p - startPiece + 1) * pieceLength) {
-        pieceDone = true;
-      }
-      if (pieceDone) {
-        runwayPiecesReady++;
-      } else {
-        break;
-      }
-    }
-  }
-
-  let firstPieceDownloaded = 0;
-  if (hasFirstPiece) {
-    firstPieceDownloaded = pieceLength;
-  } else if (pieceLength > 0) {
-    firstPieceDownloaded = Math.min(pieceLength, torrent.downloaded || 0);
-  }
-
-  const firstPieceProgress = pieceLength > 0 ? Math.min(100, Math.round((firstPieceDownloaded / pieceLength) * 100)) : 0;
-  const etaSeconds = firstPieceProgress < 100 && (torrent.downloadSpeed || 0) > 0
-    ? Math.ceil((pieceLength - firstPieceDownloaded) / torrent.downloadSpeed)
-    : null;
-  const isNativeCompatible = largestFile ? /\.(mp4|m4v|webm)$/i.test(largestFile.name) : false;
-
-  const isFastSwarm = (torrent.downloadSpeed || 0) > 1800000;
-  const targetRunwayPieces = isFastSwarm ? 3 : 6;
-  const runwayBytesReady = runwayPiecesReady * pieceLength;
-  const isRunwaySafe = runwayPiecesReady >= targetRunwayPieces || (hasFirstPiece && isFastSwarm);
-  const runwayProgress = Math.min(100, Math.round((runwayPiecesReady / targetRunwayPieces) * 100));
-
-  const estimatedDurationSec = durationSec || 7200;
-  const requiredBitrateBytesPerSec = largestFile && largestFile.length > 0 && estimatedDurationSec > 0
-    ? Math.round(largestFile.length / estimatedDurationSec)
-    : 0;
-  const isBandwidthConstrained = (torrent.downloadSpeed || 0) > 0 &&
-    requiredBitrateBytesPerSec > 0 &&
-    (torrent.downloadSpeed || 0) < requiredBitrateBytesPerSec * 0.9;
-  const speedDeficitRatio = isBandwidthConstrained && torrent.downloadSpeed > 0
-    ? Number((requiredBitrateBytesPerSec / torrent.downloadSpeed).toFixed(1))
-    : 1.0;
-
-  return res.json({
-    infoHash: torrent.infoHash,
-    magnet: magnetURI,
-    name: torrent.name || 'Resolving metadata from swarm...',
-    ready: !!torrent.ready,
-    duration: durationSec,
-    playheadPiece,
-    progress: torrent.progress || 0,
-    downloadSpeed: torrent.downloadSpeed || 0,
-    uploadSpeed: torrent.uploadSpeed || 0,
-    numPeers: torrent.numPeers || 0,
-    downloaded: torrent.downloaded || 0,
-    length: torrent.length || (largestFile ? largestFile.length : 0),
-    fileName: largestFile ? largestFile.name : null,
-    files,
-    subtitleFiles,
-    pieceLength,
-    hasFirstPiece,
-    firstPieceDownloaded,
-    firstPieceProgress,
-    runwayPiecesReady,
-    targetRunwayPieces,
-    runwayBytesReady,
-    isRunwaySafe,
-    runwayProgress,
-    requiredBitrateBytesPerSec,
-    isBandwidthConstrained,
-    speedDeficitRatio,
-    etaSeconds,
-    isNativeCompatible,
-    recommendedMode: isNativeCompatible ? 'direct' : (/(?:hevc|h\.?265|x265|2160p|4k)/i.test(largestFile?.name || torrent.name || '') ? '1080p' : 'remux'),
-    isHevcOr4K: /(?:hevc|h\.?265|x265|2160p|4k)/i.test(largestFile?.name || torrent.name || ''),
-    sourceContainer: largestFile ? (largestFile.name.split('.').pop() || '').toLowerCase() : null,
-    sourceIsRemuxRelease: /(?:remux|bluray[ ._-]*remux)/i.test(largestFile?.name || ''),
-    streamUrl: `http://localhost:3001/api/stream?raw=true&magnet=${encodeURIComponent(magnetURI)}`,
-    directStreamUrl: `http://localhost:3001/api/torrent/${torrent.infoHash}/stream`,
-    remuxStreamUrl: `http://localhost:3001/api/stream/remux?mode=copy&magnet=${encodeURIComponent(magnetURI)}`,
-    transcodeStreamUrl: `http://localhost:3001/api/stream/remux?mode=transcode&magnet=${encodeURIComponent(magnetURI)}`,
-  });
-});
-
-// Auto-Search Subtitles across online databases by movie title
-app.get('/api/subtitles/search', async (req, res) => {
-  const query = req.query.query;
-  const lang = (req.query.lang || 'eng').toLowerCase();
-
-  if (!query) {
-    return res.status(400).json({ error: 'Search query is required' });
-  }
-
-  const cleaned = cleanMovieTitle(query);
-  const searchSlug = encodeURIComponent(cleaned.toLowerCase().trim());
-
-  try {
-    const url = `https://rest.opensubtitles.org/search/query-${searchSlug}/sublanguageid-${encodeURIComponent(lang)}`;
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'TemporaryUserAgent',
-        'Host': 'rest.opensubtitles.org',
-      },
-    });
-
-    if (!response.ok) {
-      return res.json({ query: cleaned, results: [] });
-    }
-
-    const data = await response.json();
-    if (!Array.isArray(data)) {
-      return res.json({ query: cleaned, results: [] });
-    }
-
-    const results = data.slice(0, 16).map((item) => ({
-      id: `os-${item.IDSubtitleFile}`,
-      fileName: item.SubFileName,
-      language: item.LanguageName || 'English',
-      langCode: item.SubLanguageID || 'en',
-      downloadUrl: item.SubDownloadLink,
-      downloads: parseInt(item.SubDownloadsCnt, 10) || 0,
-      isHearingImpaired: item.SubHearingImpaired === '1',
-      format: item.SubFormat || 'srt',
-      rating: item.SubRating || '0.0',
-      source: 'OpenSubtitles',
-    }));
-
-    res.json({ query: cleaned, results });
-  } catch (err) {
-    console.error('Subtitle search error:', err.message);
-    res.json({ query: cleaned, results: [] });
-  }
-});
-
-// Download and convert online subtitle to WebVTT
-app.get('/api/subtitles/download', async (req, res) => {
-  const dlUrl = req.query.url;
-  if (!dlUrl) {
-    return res.status(400).send('Download URL is required');
-  }
-
-  try {
-    const response = await fetch(dlUrl, {
-      headers: {
-        'User-Agent': 'TemporaryUserAgent',
-      },
-    });
-
-    if (!response.ok) {
-      return res.status(500).send('Failed to fetch subtitle file');
-    }
-
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-
-    zlib.gunzip(buffer, (err, unzipped) => {
-      let content = '';
-      if (err) {
-        content = buffer.toString('utf8');
-      } else {
-        content = unzipped.toString('utf8');
-      }
-
-      let vtt = content;
-      if (!content.trim().startsWith('WEBVTT')) {
-        const normalized = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-        // Clean OpenSubtitles promotional text cues
-        const cleanedLines = normalized
-          .split('\n')
-          .filter((line) => !/(opensubtitles|advertise your product|vip member|osdb\.link)/i.test(line));
-        
-        vtt = 'WEBVTT\n\n' + cleanedLines.join('\n').replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2');
-      }
-
-      res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.send(vtt);
-    });
-  } catch (err) {
-    res.status(500).send('Error downloading subtitle: ' + err.message);
-  }
-});
-
-// Serve torrent subtitle as WebVTT for HTML5 video
-app.get('/api/torrent/:id/subtitle/:fileIndex', async (req, res) => {
-  const torrent = await client.get(req.params.id);
-  if (!torrent) return res.status(404).send('Torrent not found');
-  const idx = parseInt(req.params.fileIndex, 10);
-  const file = torrent.files && torrent.files[idx];
-  if (!file) return res.status(404).send('Subtitle file not found');
-
-  res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-
-  file.getBuffer((err, buffer) => {
-    if (err) return res.status(500).send('Error reading subtitle: ' + err.message);
-    const content = buffer.toString('utf8');
-    if (content.startsWith('WEBVTT')) {
-      return res.send(content);
-    }
-    const vtt = 'WEBVTT\n\n' + content
-      .replace(/\r\n/g, '\n')
-      .replace(/\r/g, '\n')
-      .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2');
-    return res.send(vtt);
-  });
-});
-
-// Stream / Direct download endpoint
-app.get('/api/stream', async (req, res) => {
-  let magnetURI = req.query.magnet;
-  const { provider, desc, link } = req.query;
-
-  if (!magnetURI && provider && (desc || link)) {
-    try {
-      magnetURI = await TorrentSearchApi.getMagnet({ provider, desc, link });
-    } catch (err) {
-      console.error('Stream getMagnet error:', err);
-      return res.status(400).send('Could not fetch magnet URI: ' + err.message);
-    }
-  }
-
-  if (!magnetURI) {
-    return res.status(400).send('Magnet URI or provider/desc parameters required');
-  }
-
-  const isHtmlNavigation = req.headers.accept && req.headers.accept.includes('text/html') && req.query.raw !== 'true';
-  if (isHtmlNavigation) {
-    const streamTarget = new URLSearchParams();
-    streamTarget.set('streamMagnet', magnetURI);
-    return res.redirect(`http://localhost:5173/?${streamTarget.toString()}`);
-  }
-
-  let torrent = await getOrAddTorrent(magnetURI, { isStreamOnly: true });
-
-  const swarmTimeout = setTimeout(() => {
-    if (!res.headersSent) {
-      res.status(504).send(
-        'Swarm timeout: No active peers found to stream directly in the browser. Please use the "Magnet" button to download using your desktop client.'
-      );
-    }
-  }, 35000);
-
-  if (torrent.ready) {
-    streamFile();
-  } else {
-    torrent.once('ready', streamFile);
-  }
-
-
-  function streamFile() {
-    clearTimeout(swarmTimeout);
-    if (res.headersSent) return;
-
-    if (!torrent.files || torrent.files.length === 0) {
-      return res.status(404).send('No files found in torrent');
-    }
-
-    const file = torrent.files.reduce((a, b) => (a.length > b.length ? a : b));
-    const mimeType = getMimeType(file.name);
-
-    // Focus bandwidth on this file & sliding window
-    try {
-      torrent.files.forEach((f) => {
-        if (f !== file && typeof f.deselect === 'function') f.deselect();
-      });
-      if (typeof file.select === 'function') file.select();
-    } catch (e) {}
-
-    const corsHeaders = {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Headers': 'Range, Content-Type, Accept',
-      'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges',
-    };
-
-    const range = req.headers.range;
-    if (range) {
-      const parts = range.replace(/bytes=/, '').split('-');
-      const start = parseInt(parts[0], 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : file.length - 1;
-      const chunksize = end - start + 1;
-
-      // Update sliding-window prefetcher to pull 50 pieces ahead of this byte offset
-      updatePrefetchWindow(torrent, file, start);
-
-      const head = {
-        'Content-Range': `bytes ${start}-${end}/${file.length}`,
-        'Accept-Ranges': 'bytes',
-        'Content-Length': chunksize,
-        'Content-Type': mimeType,
-        ...corsHeaders,
-      };
-
-      res.writeHead(206, head);
-      if (req.method === 'HEAD') return res.end();
-      const stream = file.createReadStream({ start, end });
-      stream.on('error', () => {});
-      stream.pipe(res);
-      req.on('close', () => { try { stream.destroy(); } catch (e) {} });
-    } else {
-      updatePrefetchWindow(torrent, file, 0);
-      const head = {
-        'Content-Length': file.length,
-        'Content-Type': mimeType,
-        'Accept-Ranges': 'bytes',
-        'Content-Disposition': `inline; filename="${encodeURIComponent(file.name)}"`,
-        ...corsHeaders,
-      };
-      res.writeHead(200, head);
-      if (req.method === 'HEAD') return res.end();
-      const stream = file.createReadStream();
-      stream.on('error', () => {});
-      stream.pipe(res);
-      req.on('close', () => { try { stream.destroy(); } catch (e) {} });
-    }
-  }
-});
-
-// Lossless on-the-fly Remux streaming endpoint for browser (MKV, TrueHD, DTS -> fMP4 / AAC with -c:v copy)
-app.get('/api/stream/remux', async (req, res) => {
-  let magnetURI = req.query.magnet;
-  const { provider, desc, link, mode } = req.query;
-  const seekSec = parseFloat(req.query.startTime || req.query.ss) || 0;
-
-  if (!magnetURI && provider && (desc || link)) {
-    try {
-      magnetURI = await TorrentSearchApi.getMagnet({ provider, desc, link });
-    } catch (err) {
-      return res.status(400).send('Could not fetch magnet URI: ' + err.message);
-    }
-  }
-
-  if (!magnetURI) {
-    return res.status(400).send('Magnet URI is required');
-  }
-
-  let torrent = await getOrAddTorrent(magnetURI, { isStreamOnly: true });
-  if (!torrent) {
-    return res.status(500).send('Could not initialize stream torrent from swarm.');
-  }
-
-  const swarmTimeout = setTimeout(() => {
-    if (!res.headersSent) {
-      res.status(504).send('Swarm timeout: waiting for peers to begin streaming remux.');
-    }
-  }, 35000);
-
-  if (torrent.ready) {
-    startRemuxStream();
-  } else {
-    torrent.once('ready', startRemuxStream);
-  }
-
-  function startRemuxStream() {
-    clearTimeout(swarmTimeout);
-    if (res.headersSent) return;
-
-    if (!torrent.files || torrent.files.length === 0) {
-      return res.status(404).send('No files found in torrent');
-    }
-
-    const file = torrent.files.reduce((a, b) => (a.length > b.length ? a : b));
-
-    // Focus bandwidth on this file & sliding window
-    try {
-      torrent.files.forEach((f) => {
-        if (f !== file && typeof f.deselect === 'function') {
-          f.deselect();
-        }
-      });
-      if (typeof file.select === 'function') {
-        file.select();
-      }
-      const seekByte = (seekSec > 0 && torrent._detectedDuration && torrent._detectedDuration > 0)
-        ? Math.min(file.length - 1, Math.floor((seekSec / torrent._detectedDuration) * file.length))
-        : 0;
-      updatePrefetchWindow(torrent, file, seekByte);
-    } catch (e) {}
-
-    const isNativeMp4 = /\.(mp4|m4v|webm)$/i.test(file.name);
-    // If the file is already native browser-compatible (MP4/WebM) and no transcoding is requested:
-    // Bypass FFmpeg entirely and serve native seekable HTTP 206 Partial Content Range stream.
-    // Works flawlessly and with zero CPU across Chrome, Edge, and Safari.
-    if (isNativeMp4 && (mode === 'copy' || !mode || mode === 'direct' || mode === 'safari')) {
-      const mimeType = getMimeType(file.name);
-      const corsHeaders = {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Range, Content-Type, Accept',
-        'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges',
-      };
-
-      const range = req.headers.range;
-      if (range) {
-        const parts = range.replace(/bytes=/, '').split('-');
-        const start = parseInt(parts[0], 10);
-        const end = parts[1] ? parseInt(parts[1], 10) : file.length - 1;
-        const chunksize = end - start + 1;
-
-        updatePrefetchWindow(torrent, file, start);
-
-        res.writeHead(206, {
-          'Content-Range': `bytes ${start}-${end}/${file.length}`,
-          'Accept-Ranges': 'bytes',
-          'Content-Length': chunksize,
-          'Content-Type': mimeType,
-          ...corsHeaders,
-        });
-
-        if (req.method === 'HEAD') return res.end();
-        const stream = file.createReadStream({ start, end });
-        stream.on('error', () => {});
-        stream.pipe(res);
-        req.on('close', () => { try { stream.destroy(); } catch (e) {} });
-        return;
-      } else {
-        updatePrefetchWindow(torrent, file, 0);
-        res.writeHead(200, {
-          'Content-Length': file.length,
-          'Content-Type': mimeType,
-          'Accept-Ranges': 'bytes',
-          'Content-Disposition': `inline; filename="${encodeURIComponent(file.name)}"`,
-          ...corsHeaders,
-        });
-
-        if (req.method === 'HEAD') return res.end();
-        const stream = file.createReadStream();
-        stream.on('error', () => {});
-        stream.pipe(res);
-        req.on('close', () => { try { stream.destroy(); } catch (e) {} });
-        return;
-      }
-    }
-
-    // Video codec handling for MKV or requested transcode:
-    const isHevc = /(?:hevc|h\.?265|x265|2160p|4k)/i.test(file.name);
-    const userAgent = (req.headers['user-agent'] || '').toLowerCase();
-    const isSafari = userAgent.includes('safari') && !userAgent.includes('chrome') && !userAgent.includes('chromium');
-
-    let effectiveMode = mode || 'copy';
-    // Chrome/Edge/Firefox on macOS fail to decode 10-bit HEVC inside fragmented MP4, causing a frozen black screen.
-    // If client requested 'copy' or 'remux' on 4K/HEVC in Chrome, automatically use 1080p Apple Silicon hardware transcode.
-    if ((effectiveMode === 'copy' || effectiveMode === 'remux') && isHevc && !isSafari && req.query.forceCopy !== 'true') {
-      console.log(`[Stream Transcode] HEVC 10-bit detected for Chrome/Edge. Auto-switching to 1080p hardware transcode to avoid black screen.`);
-      effectiveMode = '1080p';
-    }
-
-    let vCodecArgs = ['-c:v', 'copy'];
-
-    if (effectiveMode === 'browser4k') {
-      vCodecArgs = getUniversalEncoderArgs(2160, '12M', '15M', '20M');
-    } else if (effectiveMode === 'transcode' || effectiveMode === '1080p') {
-      vCodecArgs = getUniversalEncoderArgs(1080, '3.2M', '4.2M', '5M');
-    } else if (effectiveMode === '720p') {
-      vCodecArgs = getUniversalEncoderArgs(720, '1.8M', '2.4M', '3.5M');
-    } else if (effectiveMode === '480p') {
-      vCodecArgs = getUniversalEncoderArgs(480, '800k', '1.2M', '1.8M');
-    }
-
-    // Safari identifies copied HEVC in MP4 by the hvc1 sample entry. Many
-    // remuxes arrive tagged hev1, which can produce a silent black player.
-    const hevcTagArgs = (effectiveMode === 'copy' || effectiveMode === 'remux') && /(?:hevc|h\.265|x265)/i.test(file.name)
-      ? ['-tag:v', 'hvc1']
-      : [];
-
-    // For transcode modes, force IDR keyframes every 2s so the browser can seek/start cleanly
-    const gopArgs = (effectiveMode === 'copy' || effectiveMode === 'remux')
-      ? []  // copy mode: no transcoding, no forced GOP
-      : ['-g', '48', '-keyint_min', '24'];  // ~2s keyframe interval at 24fps
-
-    const seekArgs = seekSec > 0 ? ['-ss', String(seekSec)] : [];
-
-    const ffmpegArgs = [
-      '-hide_banner',
-      '-loglevel', 'warning',
-      '-fflags', '+discardcorrupt+genpts+igndts',
-      '-probesize', '3M',
-      '-analyzeduration', '1000k',
-      '-i', 'pipe:0',
-      ...seekArgs,
-      '-avoid_negative_ts', 'make_zero',
-      '-map', '0:v:0?',
-      '-map', '0:a:0?',
-      '-sn',
-      '-dn',
-      ...vCodecArgs,
-      ...hevcTagArgs,
-      ...gopArgs,
-      '-c:a', 'aac',
-      '-b:a', '192k',
-      '-ac', '2',
-      '-ar', '48000',
-      '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
-      '-brand', 'mp42',
-      '-max_interleave_delta', '0',
-      '-flush_packets', '1',
-      '-f', 'mp4',
-      'pipe:1',
-    ];
-
-    const ff = spawn(FFMPEG_BIN, ffmpegArgs);
-    const readStream = file.createReadStream();
-
-    readStream.on('error', () => {});
-    ff.stdin.on('error', () => {});
-    ff.stdout.on('error', () => {});
-
-    // Dynamic Sliding Window Prefetch tracking for FFmpeg pipeline
-    let bytesRead = 0;
-    let lastPrefetchByte = 0;
-    const pieceSize = torrent.pieceLength || 2097152;
-    readStream.on('data', (chunk) => {
-      bytesRead += chunk.length;
-      if (bytesRead - lastPrefetchByte > 3 * pieceSize) {
-        lastPrefetchByte = bytesRead;
-        updatePrefetchWindow(torrent, file, bytesRead);
-      }
-    });
-
-    readStream.pipe(ff.stdin);
-    let responseStarted = false;
-    let initBuffer = Buffer.alloc(0);
-
-    const writeResponseHeaders = () => {
-      res.writeHead(200, {
-        'Content-Type': 'video/mp4',
-        'Accept-Ranges': 'bytes',
-        'Cache-Control': 'no-cache, no-store',
-        'Connection': 'keep-alive',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Range, Content-Type, Accept',
-      });
-    };
-
-    // Safari is strict about fragmented MP4 initialization. Do not send a
-    // partial ftyp/moov box as the first HTTP chunk; hold only the small init
-    // segment until the complete moov box is present.
-    const hasCompleteInit = (buffer) => {
-      const moovMarker = Buffer.from('moov');
-      const markerAt = buffer.indexOf(moovMarker);
-      if (markerAt < 4) return false;
-      const boxStart = markerAt - 4;
-      const boxSize = buffer.readUInt32BE(boxStart);
-      return boxSize >= 8 && buffer.length >= boxStart + boxSize;
-    };
-
-    ff.stdout.on('data', (chunk) => {
-      if (!responseStarted) {
-        initBuffer = Buffer.concat([initBuffer, chunk]);
-        if (!hasCompleteInit(initBuffer) && initBuffer.length < 2 * 1024 * 1024) return;
-        responseStarted = true;
-        writeResponseHeaders();
-        res.write(initBuffer);
-        return;
-      }
-      res.write(chunk);
-    });
-    ff.stdout.on('end', () => {
-      if (!res.writableEnded) res.end();
-    });
-
-    ff.stderr.on('data', (data) => {
-      console.error('FFmpeg stderr:', data.toString());
-    });
-
-    torrent._activeStreams = (torrent._activeStreams || 0) + 1;
-
-    const cleanup = () => {
-      torrent._activeStreams = Math.max(0, (torrent._activeStreams || 1) - 1);
-      try { readStream.destroy(); } catch (e) {}
-      try { ff.kill('SIGKILL'); } catch (e) {}
-    };
-
-    req.on('close', cleanup);
-    res.on('finish', cleanup);
-    ff.on('error', (err) => {
-      cleanup();
-    });
-  }
-});
-
-// Smart Alternative Torrent Finder (Provides fast 1080p/720p alternatives for bandwidth-constrained 4K streams)
-app.get('/api/torrent/alternatives', async (req, res) => {
-  const query = req.query.query;
-  if (!query) return res.status(400).json({ error: 'Query is required' });
-  try {
-    const cleanTitle = query
-      .replace(/\.(2160p|1080p|720p|480p|remux|bluray|hevc|web-dl|x264|x265|dts|truehd|atmos).*$/i, '')
-      .replace(/[._]/g, ' ')
-      .trim();
-
-    const results = await TorrentSearchApi.search(cleanTitle, 'Movies', 20);
-    const valid = (results || [])
-      .filter((r) => r.seeds > 5 && !/(?:2160p|4k|remux)/i.test(r.title))
-      .sort((a, b) => (b.seeds || 0) - (a.seeds || 0))
-      .slice(0, 5)
-      .map((r) => ({
-        title: r.title,
-        size: r.size,
-        seeds: r.seeds,
-        peers: r.peers,
-        provider: r.provider,
-        desc: r.desc,
-        link: r.link,
-      }));
-    return res.json({ alternatives: valid });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-});
+// ---------------------------------------------------------------------------
+// Server Initialization
+// ---------------------------------------------------------------------------
 
 app.listen(port, () => {
   console.log(`Svorrent API running on http://localhost:${port}`);

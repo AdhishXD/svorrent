@@ -65,14 +65,6 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
     }
   };
 
-  const openInPlayer = async (t) => {
-    try {
-      const data = await apiPost(`/torrent/${t.infoHash}/play-native`);
-      notify(data.player ? `Opened in ${data.player}` : 'Opened in default player');
-    } catch (err) {
-      notify(err.message || 'Could not open file', 'error');
-    }
-  };
 
   return (
     <section className="downloads-page">
@@ -174,9 +166,6 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
                             <Icon name={t.paused ? 'play' : 'pause'} />
                           </button>
                         )}
-                        <button className="icon-btn" onClick={() => openInPlayer(t)} title="Open in desktop player" aria-label="Open in desktop player">
-                          <Icon name="external" />
-                        </button>
                         <button className="icon-btn" onClick={() => reveal(t.infoHash)} title="Show in Finder" aria-label="Show in Finder">
                           <Icon name="folder" />
                         </button>
@@ -201,7 +190,6 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
           torrentId={detailsId}
           onClose={() => setDetailsId(null)}
           onReveal={() => reveal(detailsId)}
-          onOpen={() => openInPlayer({ infoHash: detailsId })}
         />
       )}
     </section>

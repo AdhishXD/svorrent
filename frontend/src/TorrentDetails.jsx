@@ -61,7 +61,7 @@ function Drawer({ title, subtitle, onClose, children, footer }) {
   );
 }
 
-function DetailsInner({ torrentId, onClose, onReveal, onOpen }) {
+function DetailsInner({ torrentId, onClose, onReveal }) {
   const [stats, setStats] = useState(null);
   const [tab, setTab] = useState('files');
 
@@ -109,14 +109,9 @@ function DetailsInner({ torrentId, onClose, onReveal, onOpen }) {
       subtitle={torrentId}
       onClose={onClose}
       footer={
-        <>
-          <button className="btn btn-outline" onClick={onReveal}>
-            <Icon name="folder" size={14} /> Show in Finder
-          </button>
-          <button className="btn btn-primary" onClick={onOpen}>
-            Open in player
-          </button>
-        </>
+        <button className="btn btn-outline" onClick={onReveal}>
+          <Icon name="folder" size={14} /> Show in Finder
+        </button>
       }
     >
       <dl className="stat-grid">
