@@ -128,6 +128,92 @@ This installs a system launchd daemon that detects Android devices connected via
 
 ---
 
+## System Architecture
+
+The following diagram details the interconnectivity between the client interface, backend coordination subsystems, kernel-level network binding, and external peer connections:
+
+```mermaid
+flowchart TD
+    subgraph Client["Frontend Client (React :5173)"]
+        UI_Search["Search Engine<br/>(Query dispatch & tracker deduplication)"]
+        UI_Queue["Download Queue<br/>(Progress tracking & stream state)"]
+        UI_Swarm["Swarm Modal<br/>(SVG vector map & peer telemetry)"]
+        UI_Net["Network Monitor<br/>(Adapter status & traffic sparklines)"]
+    end
+
+    subgraph Server["Backend Core (Express :3001)"]
+        API["REST API Router<br/>(/api/search, /api/torrents, /api/networks, /api/play)"]
+        
+        subgraph TorrentEngine["BitTorrent Engine"]
+            WT["WebTorrent Client<br/>(Sequential piece priority & chunk assembly)"]
+            Bitfield["Bitfield Analyzer<br/>(8-bit popcount table & completion state)"]
+            Session["Session Manager<br/>(Fast-resume checkpoints & disk reconciliation)"]
+        end
+
+        subgraph MediaEngine["Buffer-Free Playability Engine"]
+            Probe["ffprobe Metadata Extractor<br/>(Container runtime & bitrate inspection)"]
+            Calc["Safety Gate Evaluator<br/>(Download ETA × 1.20 ≤ Video Runtime)"]
+            Launcher["Player Spawn Controller<br/>(Native VLC execution via OS process)"]
+        end
+
+        subgraph NetLayer["Multi-Network Bonding Layer"]
+            NetMgr["Interface Coordinator<br/>(Adapter discovery & IP binding registry)"]
+            SocketHook["Socket Interceptor<br/>(net.connect localAddress striping)"]
+        end
+    end
+
+    subgraph OS["Operating System & Local Resources"]
+        IF_WiFi["Wi-Fi Adapter (en0)"]
+        IF_Tether["Android USB Tether (feth0)<br/>(svorrent-tetherd / CDC-NCM)"]
+        IF_Eth["Ethernet / Secondary (en1)"]
+        Disk["Filesystem Storage<br/>(~/Downloads/Svorrent/)"]
+        VLC["VLC Media Player"]
+    end
+
+    subgraph Remote["External Network & Swarm"]
+        Trackers["Public Trackers & DHT"]
+        Peers["Distributed Peer Swarm"]
+    end
+
+    %% Frontend to Backend interactions
+    UI_Search -->|Dispatch search query| API
+    UI_Queue -->|Poll torrent telemetry| API
+    UI_Queue -->|Trigger safe playback| API
+    UI_Swarm -->|Request peer & GeoIP metrics| API
+    UI_Net -->|Fetch adapter throughput| API
+
+    %% Backend internal orchestration
+    API --> WT
+    API --> NetMgr
+    API --> MediaEngine
+    
+    WT --> Bitfield
+    WT --> Session
+    Session <--> Disk
+    WT --> Disk
+
+    %% Playability flow
+    MediaEngine --> Probe
+    Probe --> Disk
+    Probe --> Calc
+    Calc -->|Threshold satisfied| Launcher
+    Launcher -->|Spawn process| VLC
+
+    %% Multi-network socket routing
+    NetMgr --> SocketHook
+    SocketHook -->|Bind socket IP| IF_WiFi
+    SocketHook -->|Bind socket IP| IF_Tether
+    SocketHook -->|Bind socket IP| IF_Eth
+
+    %% Uplinks to Remote Swarm
+    IF_WiFi -->|TCP/uTP Peer Wire| Peers
+    IF_Tether -->|TCP/uTP Peer Wire| Peers
+    IF_Eth -->|TCP/uTP Peer Wire| Peers
+    WT -->|Announce & scrape| Trackers
+```
+
+---
+
 ## Technical Specifications
 
 | Component | Implementation |
