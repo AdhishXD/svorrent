@@ -68,6 +68,13 @@ function App() {
   const down = downloads.reduce((sum, t) => sum + (t.downloadSpeed || 0), 0);
   const up = downloads.reduce((sum, t) => sum + (t.uploadSpeed || 0), 0);
 
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const handleGoSearch = (term) => {
+    if (typeof term === 'string') setSearchTerm(term);
+    navigate('search');
+  };
+
   return (
     <div className="app">
       <header className="topbar">
@@ -130,7 +137,7 @@ function App() {
 
       <main className="page">
         <div hidden={route !== 'search'}>
-          <SearchPage notify={notify} onDownloadAdded={refreshTorrents} />
+          <SearchPage initialQuery={searchTerm} notify={notify} onDownloadAdded={refreshTorrents} />
         </div>
         {route === 'downloads' && (
           <DownloadsManager
@@ -138,7 +145,7 @@ function App() {
             setTorrents={setTorrents}
             refresh={refreshTorrents}
             notify={notify}
-            onGoSearch={() => navigate('search')}
+            onGoSearch={handleGoSearch}
           />
         )}
         {route === 'networks' && (

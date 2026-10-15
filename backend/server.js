@@ -13,6 +13,8 @@ import peerid from 'bittorrent-peerid';
 import { createTrackerList } from './lib/trackers.js';
 import { createSession } from './lib/session.js';
 import { NetworkManager } from './lib/networks.js';
+import { TorrentArchive } from './lib/archive.js';
+import { FolderScanner } from './lib/scanner.js';
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -79,20 +81,45 @@ if (!Wire.nativeRC4) {
 }
 
 const networkManager = new NetworkManager(() => client);
+const archive = new TorrentArchive(DATA_DIR);
+const folderScanner = new FolderScanner(DOWNLOAD_DIR, () => client, () => archive);
 
 // ---------------------------------------------------------------------------
-// Session Persistence
+// Session Persistence & Archive
 // ---------------------------------------------------------------------------
 
 const session = createSession(DATA_DIR);
-const saveSession = () => session.save(client.torrents);
+const saveSession = () => {
+  session.save(client.torrents);
+  if (client.torrents) {
+    for (const t of client.torrents) {
+      if (t.ready && t._isPermanentDownload) {
+        archive.save(t);
+      }
+    }
+  }
+};
 
 setInterval(() => {
   saveSession();
 }, 20 * 1000).unref();
 
 async function restoreSession() {
-  const entries = session.load();
+  let entries = session.load();
+  if (!entries || !entries.length) {
+    const archived = archive.getAll();
+    if (archived && archived.length > 0) {
+      console.log(`[session] Restoring ${archived.length} torrent(s) from persistent archive...`);
+      entries = archived.map((a) => ({
+        infoHash: a.infoHash,
+        magnet: a.magnetURI,
+        name: a.name,
+        path: a.path || DOWNLOAD_DIR,
+        paused: false,
+        addedAt: a.savedAt,
+      }));
+    }
+  }
   if (!entries || !entries.length) return;
   console.log(`[session] Restoring ${entries.length} torrent(s) from persistent state...`);
 
@@ -226,11 +253,13 @@ function setupTorrentHooks(torrent) {
         } catch (e) {}
       });
     }
+    archive.save(torrent);
     saveSession();
   });
 
   torrent.on('done', () => {
     console.log(`[torrent done] Download completed: ${torrent.name || torrent.infoHash}`);
+    archive.save(torrent);
     saveSession();
   });
 }
@@ -552,6 +581,9 @@ app.post('/api/torrent/:id/delete', async (req, res) => {
   const torrent = await client.get(req.params.id);
   if (!torrent) return res.status(404).json({ error: 'Torrent not found' });
   const { deleteFiles } = req.body;
+  if (deleteFiles) {
+    archive.remove(req.params.id);
+  }
   torrent.destroy({ destroyStore: !!deleteFiles }, () => {
     saveSession();
     res.json({ success: true, deleted: true });
@@ -608,6 +640,95 @@ app.post('/api/networks/simulate', (req, res) => {
   const { enabled } = req.body;
   networkManager.toggleSimulation(!!enabled);
   res.json({ success: true, ...networkManager.getSnapshot() });
+});
+
+// ---------------------------------------------------------------------------
+// Local Download Folder Inspection & Halfway Download Recovery
+// ---------------------------------------------------------------------------
+
+// 1. Get on-disk folder files & halfway downloads status
+app.get('/api/folder-files', (req, res) => {
+  res.json(folderScanner.scan());
+});
+
+// 2. Resume halfway or untracked download
+app.post('/api/folder-files/resume', async (req, res) => {
+  const { infoHash, magnet } = req.body;
+
+  try {
+    let source = magnet;
+    let targetPath = DOWNLOAD_DIR;
+
+    if (infoHash) {
+      const archived = archive.get(infoHash);
+      if (archived) {
+        source = archived.torrentBuffer || archived.magnetURI || `magnet:?xt=urn:btih:${infoHash}`;
+        if (archived.path) targetPath = archived.path;
+      } else {
+        source = `magnet:?xt=urn:btih:${infoHash}`;
+      }
+    }
+
+    if (!source) {
+      return res.status(400).json({ error: 'infoHash or magnet is required to resume download' });
+    }
+
+    const torrent = await getOrAddTorrent(source, { path: targetPath });
+    if (!torrent) {
+      return res.status(500).json({ error: 'Failed to add torrent to client' });
+    }
+
+    torrent._isPermanentDownload = true;
+    torrent.paused = false;
+    torrent._pausedManually = false;
+
+    // Trigger local files verification if already ready
+    if (torrent.ready && typeof torrent.rescanFiles === 'function') {
+      try { torrent.rescanFiles(); } catch (e) {}
+    }
+
+    saveSession();
+    res.json({
+      success: true,
+      resumed: true,
+      infoHash: torrent.infoHash,
+      name: torrent.name || 'Resolving metadata...',
+    });
+  } catch (err) {
+    console.error('[resume error]:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 3. Delete unwanted file or directory from DOWNLOAD_DIR
+app.post('/api/folder-files/delete', (req, res) => {
+  const { name } = req.body;
+  try {
+    const result = folderScanner.deleteItem(name);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4. Force recheck existing torrent files on disk
+app.post('/api/torrent/:id/recheck', async (req, res) => {
+  const torrent = await client.get(req.params.id);
+  if (!torrent) return res.status(404).json({ error: 'Torrent not found' });
+
+  if (typeof torrent.rescanFiles === 'function') {
+    torrent.rescanFiles((err) => {
+      if (err) return res.status(500).json({ error: err.message });
+      saveSession();
+      res.json({
+        success: true,
+        progress: torrent.progress || 0,
+        downloaded: torrent.downloaded || 0,
+      });
+    });
+  } else {
+    res.json({ success: true, progress: torrent.progress || 0 });
+  }
 });
 
 // ---------------------------------------------------------------------------

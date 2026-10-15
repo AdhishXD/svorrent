@@ -16,8 +16,8 @@ function seedClass(seeds) {
   return 'seeds-low';
 }
 
-export function SearchPage({ notify, onDownloadAdded }) {
-  const [query, setQuery] = useState('');
+export function SearchPage({ notify, onDownloadAdded, initialQuery }) {
+  const [query, setQuery] = useState(initialQuery || '');
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchedTerm, setSearchedTerm] = useState('');
@@ -52,6 +52,12 @@ export function SearchPage({ notify, onDownloadAdded }) {
       if (activeTerm.current === term) setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (initialQuery && initialQuery.trim()) {
+      setQuery(initialQuery.trim());
+    }
+  }, [initialQuery]);
 
   // Search after the user stops typing for a moment.
   useEffect(() => {

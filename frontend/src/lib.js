@@ -51,3 +51,18 @@ export function parseSize(str) {
   const power = { '': 0, K: 1, M: 2, G: 3, T: 4 }[match[2].toUpperCase()] ?? 0;
   return parseFloat(match[1]) * Math.pow(1024, power);
 }
+
+export function formatDate(ms) {
+  if (!ms) return '—';
+  const d = new Date(ms);
+  const now = new Date();
+  const diffDays = Math.floor((now - d) / (1000 * 60 * 60 * 24));
+  if (diffDays === 0) {
+    return `Today, ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  }
+  if (diffDays === 1) {
+    return `Yesterday, ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  }
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric', year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined });
+}
+
