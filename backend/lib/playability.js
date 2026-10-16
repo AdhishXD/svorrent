@@ -170,7 +170,7 @@ export function findPrimaryVideoInFolder(item) {
             try {
               const stat = fs.statSync(full);
               candidates.push({ fullPath: full, name: entry.name, length: stat.size, downloaded: stat.size });
-            } catch (e) {}
+            } catch {}
           }
         }
       }
@@ -182,7 +182,7 @@ export function findPrimaryVideoInFolder(item) {
 
     folderPrimaryVideoCache.set(cacheKey, { result, cachedAt: Date.now() });
     return result;
-  } catch (e) {
+  } catch {
     return null;
   }
 }

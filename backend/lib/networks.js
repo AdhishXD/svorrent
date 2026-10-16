@@ -51,7 +51,7 @@ async function getMacHardwarePortNames() {
         map.set(device, port);
       }
     }
-  } catch (e) {}
+  } catch {}
 
   try {
     const { stdout } = await execAsync('networksetup -listnetworkserviceorder');
@@ -62,7 +62,7 @@ async function getMacHardwarePortNames() {
         map.set(device, port);
       }
     }
-  } catch (e) {}
+  } catch {}
 
   return map;
 }
@@ -119,14 +119,14 @@ export class NetworkManager {
       } else {
         this.usbTetherDevice = { found: false, name: null };
       }
-    } catch (e) {
+    } catch {
       this.usbTetherDevice = { found: false, name: null };
     }
 
     try {
       const { stdout: pgrepOut } = await execAsync('pgrep -x svorrent-tetherd');
       this.isTetherDaemonRunning = !!pgrepOut.trim();
-    } catch (e) {
+    } catch {
       this.isTetherDaemonRunning = false;
     }
   }
@@ -274,7 +274,7 @@ export class NetworkManager {
             for (const wire of t.wires) {
               const ifaceId = this.wireToInterface.get(wire);
               if (ifaceId === id) {
-                try { wire.destroy(); } catch (e) {}
+                try { wire.destroy(); } catch {}
               }
             }
           }
@@ -309,7 +309,7 @@ export class NetworkManager {
         for (const wire of t.wires) {
           const assignedId = this.wireToInterface.get(wire);
           if (assignedId && (!availableActiveIds.includes(assignedId) || this.disabledIds.has(assignedId))) {
-            try { wire.destroy(); } catch (e) {}
+            try { wire.destroy(); } catch {}
           }
         }
       }

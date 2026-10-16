@@ -29,7 +29,7 @@ export function createSession(dataDir) {
       for (const e of currentOnDisk) {
         if (e.infoHash) existingMap.set(e.infoHash.toLowerCase(), e);
       }
-    } catch (e) {}
+    } catch {}
 
     const entries = torrents
       .filter((t) => t._isPermanentDownload && !t.destroyed)

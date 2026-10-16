@@ -93,7 +93,7 @@ function getWireClientName(wire) {
       if (parsed?.client) {
         rawClient = `${parsed.client} ${parsed.version || ''}`.trim();
       }
-    } catch (e) {}
+    } catch {}
   }
   return parseClientString(rawClient);
 }
@@ -113,7 +113,7 @@ function getPeerGeo(remoteIp) {
         ll: lookup.ll || null,
       };
     }
-  } catch (e) {}
+  } catch {}
   return { country: 'unknown', countryCode: '??', city: '', region: '', ll: null };
 }
 
@@ -251,7 +251,7 @@ async function restoreSession() {
       if (entry.bitfield) {
         try {
           addOpts.bitfield = Buffer.from(entry.bitfield, 'base64');
-        } catch (e) {}
+        } catch {}
       }
 
       const torrent = client.add(source, addOpts);
@@ -281,7 +281,7 @@ async function shutdownCleanup() {
   saveSession();
   try {
     await new Promise((resolve) => client.destroy(resolve));
-  } catch (e) {}
+  } catch {}
   process.exit(0);
 }
 process.on('SIGINT', shutdownCleanup);
@@ -328,7 +328,7 @@ function enrichMagnetWithTrackers(magnetURI) {
   for (const match of magnetURI.matchAll(/(?:^|&)tr=([^&]*)/g)) {
     try {
       existing.add(decodeURIComponent(match[1]));
-    } catch (e) {
+    } catch {
       existing.add(match[1]);
     }
   }
@@ -352,7 +352,7 @@ function setupTorrentHooks(torrent) {
     try {
       if (typeof wire.unchoke === 'function') wire.unchoke();
       if (typeof wire.interested === 'function') wire.interested();
-    } catch (e) {}
+    } catch {}
   });
 
   torrent.once('ready', () => {
@@ -374,7 +374,7 @@ function setupTorrentHooks(torrent) {
         try {
           w.unchoke();
           w.interested();
-        } catch (e) {}
+        } catch {}
       });
     }
     archive.save(torrent);
@@ -411,7 +411,7 @@ async function getOrAddTorrent(magnetURI, opts = {}) {
         if (existing?.bitfield) {
           addOpts.bitfield = Buffer.from(existing.bitfield, 'base64');
         }
-      } catch (e) {}
+      } catch {}
     }
 
     try {
@@ -880,12 +880,12 @@ app.post('/api/torrent/:id/pause', async (req, res) => {
     if (torrent.pieces && torrent.pieces.length > 0) {
       torrent.deselect(0, torrent.pieces.length - 1, false);
     }
-  } catch (e) {}
+  } catch {}
 
   if (torrent.wires) {
     torrent.wires.forEach((wire) => {
-      try { wire.choke(); } catch (e) {}
-      try { wire.uninterested(); } catch (e) {}
+      try { wire.choke(); } catch {}
+      try { wire.uninterested(); } catch {}
     });
   }
 
@@ -905,15 +905,15 @@ app.post('/api/torrent/:id/resume', async (req, res) => {
     if (torrent.pieces && torrent.pieces.length > 0) {
       torrent.select(0, torrent.pieces.length - 1, false);
     }
-  } catch (e) {}
+  } catch {}
 
   if (torrent.wires) {
     torrent.wires.forEach((wire) => {
-      try { wire.unchoke(); } catch (e) {}
-      try { wire.interested(); } catch (e) {}
+      try { wire.unchoke(); } catch {}
+      try { wire.interested(); } catch {}
     });
   }
-  try { torrent._drain(); } catch (e) {}
+  try { torrent._drain(); } catch {}
 
   saveSession();
   res.json({ success: true, paused: false });
@@ -1083,7 +1083,7 @@ app.post('/api/folder-files/resume', async (req, res) => {
 
     // Trigger local files verification if already ready
     if (torrent.ready && typeof torrent.rescanFiles === 'function') {
-      try { torrent.rescanFiles(); } catch (e) {}
+      try { torrent.rescanFiles(); } catch {}
     }
 
     saveSession();

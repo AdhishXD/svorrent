@@ -53,11 +53,13 @@ export function SearchPage({ notify, onDownloadAdded, initialQuery }) {
     }
   };
 
-  useEffect(() => {
+  const [prevInitial, setPrevInitial] = useState(initialQuery);
+  if (initialQuery !== prevInitial) {
+    setPrevInitial(initialQuery);
     if (initialQuery && initialQuery.trim()) {
       setQuery(initialQuery.trim());
     }
-  }, [initialQuery]);
+  }
 
   // Search after user stops typing
   useEffect(() => {

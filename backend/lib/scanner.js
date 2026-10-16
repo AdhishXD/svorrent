@@ -25,9 +25,9 @@ function getDirectorySize(dirPath) {
           total += st.size;
           fileCount++;
         }
-      } catch (e) {}
+      } catch {}
     }
-  } catch (e) {}
+  } catch {}
   return { total, fileCount };
 }
 
@@ -108,7 +108,7 @@ export class FolderScanner {
         } else {
           sizeOnDisk = stat.size;
         }
-      } catch (e) {
+      } catch {
         continue;
       }
 

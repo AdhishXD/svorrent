@@ -66,7 +66,7 @@ export class TorrentArchive {
               const hasTorrentFile = fs.existsSync(path.join(this.archiveDir, `${parsed.infoHash}.torrent`));
               list.push({ ...parsed, hasTorrentFile });
             }
-          } catch (e) {}
+          } catch {}
         }
       }
       return list;
@@ -124,7 +124,7 @@ export class TorrentArchive {
   remove(infoHash) {
     if (!infoHash) return;
     const h = infoHash.toLowerCase();
-    try { fs.unlinkSync(path.join(this.archiveDir, `${h}.json`)); } catch (e) {}
-    try { fs.unlinkSync(path.join(this.archiveDir, `${h}.torrent`)); } catch (e) {}
+    try { fs.unlinkSync(path.join(this.archiveDir, `${h}.json`)); } catch {}
+    try { fs.unlinkSync(path.join(this.archiveDir, `${h}.torrent`)); } catch {}
   }
 }

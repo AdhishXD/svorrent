@@ -18,14 +18,6 @@ export async function apiPost(path, body) {
   return data;
 }
 
-export async function apiDelete(path) {
-  const res = await fetch(`${API}${path}`, {
-    method: 'DELETE',
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
-  return data;
-}
 
 export function formatBytes(bytes) {
   if (!bytes || bytes <= 0) return '0 B';
