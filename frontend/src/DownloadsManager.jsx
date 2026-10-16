@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { TorrentDetails } from './TorrentDetails';
 import { SwarmModal } from './SwarmModal';
 import { Icon } from './Icon';
@@ -30,6 +30,12 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
   const [resumeModalOpen, setResumeModalOpen] = useState(false);
   const [magnetInput, setMagnetInput] = useState('');
   const [resuming, setResuming] = useState(false);
+
+  useEffect(() => {
+    if (window.location.hash.includes('swarm=open') && torrents.length > 0) {
+      setSwarmTorrent(torrents[0]);
+    }
+  }, [torrents]);
 
   const counts = {
     all: torrents.length,

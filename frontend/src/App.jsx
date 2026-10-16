@@ -7,8 +7,9 @@ import { apiGet, formatSpeed } from './lib';
 
 const routeFromPath = () => {
   const p = window.location.pathname;
-  if (p.startsWith('/downloads')) return 'downloads';
-  if (p.startsWith('/networks')) return 'networks';
+  const h = window.location.hash;
+  if (p.startsWith('/downloads') || h.includes('downloads')) return 'downloads';
+  if (p.startsWith('/networks') || h.includes('networks')) return 'networks';
   return 'search';
 };
 

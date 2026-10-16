@@ -35,7 +35,7 @@ $$\text{Download ETA} \times 1.20 \le \text{Video Runtime}$$
 #### 2.3 Swarm Telemetry Matrix & Peer Inspector
 Every download row includes an isolated Swarm button opening a per-torrent inspector with a dual-view switcher:
 
-![Swarm Telemetry Matrix and Peer Inspector](docs/screenshots/swarm_modal.webp)
+![Swarm Telemetry Matrix and Peer Inspector](docs/screenshots/swarm_modal.webp?v=telemetry-matrix)
 
 - **Piece Bitfield & Sequential Streaming Frontier**: Renders verified chunk blocks on disk alongside real-time download blocks and the sequential playback frontier cursor.
 - **Swarm Piece Availability Heatmap**: Visualizes piece availability rarity across all connected peers from rare (<25%) to abundant (100%).
