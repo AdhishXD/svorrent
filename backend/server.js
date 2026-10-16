@@ -749,6 +749,7 @@ app.get('/api/swarm', (req, res) => {
         ip: remoteIp,
         port: wire.remotePort || 0,
         client: clientStr,
+        protocol: wire._utp ? 'uTP' : (wire.type === 'webrtc' ? 'WebRTC' : 'TCP'),
         geo,
         networkInterface: ifaceName,
         networkDevice: ifaceDevice,
@@ -804,6 +805,57 @@ app.get('/api/swarm', (req, res) => {
   const countries = Array.from(countryMap.values()).sort((a, b) => b.count - a.count);
   const interfaces = Array.from(interfaceMap.values());
 
+  // Piece completion and swarm availability telemetry
+  let pieceTelemetry = null;
+  const targetTorrent = id ? torrents.find((t) => t.infoHash === id.toLowerCase()) : (torrents[0] || null);
+  if (targetTorrent && targetTorrent.pieces && targetTorrent.bitfield) {
+    const totalPieces = targetTorrent.pieces.length;
+    let verifiedCount = 0;
+    for (let i = 0; i < totalPieces; i++) {
+      if (targetTorrent.bitfield.get(i)) verifiedCount++;
+    }
+
+    const blocksCount = Math.min(totalPieces, 140);
+    const step = totalPieces / blocksCount;
+    const piecesGrid = [];
+    const availability = [];
+    const numWires = targetTorrent.wires ? targetTorrent.wires.length : 0;
+
+    for (let i = 0; i < blocksCount; i++) {
+      const pieceIdx = Math.floor(i * step);
+      const isDone = targetTorrent.bitfield.get(pieceIdx);
+      const isDownloading = !isDone && targetTorrent.pieces[pieceIdx] && targetTorrent.pieces[pieceIdx].missing < targetTorrent.pieces[pieceIdx].length;
+      piecesGrid.push(isDone ? 2 : isDownloading ? 1 : 0);
+
+      let peersWithPiece = 0;
+      if (targetTorrent.wires) {
+        for (const w of targetTorrent.wires) {
+          if (w.peerPieces?.get(pieceIdx)) peersWithPiece++;
+        }
+      }
+      availability.push(numWires > 0 ? Math.min(100, Math.round((peersWithPiece / numWires) * 100)) : 0);
+    }
+
+    let streamingCursor = 0;
+    for (let i = 0; i < totalPieces; i++) {
+      if (!targetTorrent.bitfield.get(i)) {
+        streamingCursor = i;
+        break;
+      }
+    }
+
+    pieceTelemetry = {
+      totalPieces,
+      pieceLength: targetTorrent.pieceLength || 0,
+      verifiedPieces: verifiedCount,
+      progressPercent: Math.min(100, Math.round((verifiedCount / totalPieces) * 100)),
+      streamingCursorPiece: streamingCursor,
+      streamingCursorPercent: totalPieces > 0 ? Math.round((streamingCursor / totalPieces) * 100) : 0,
+      piecesGrid,
+      availability,
+    };
+  }
+
   res.json({
     peers: allPeers,
     summary: {
@@ -812,6 +864,7 @@ app.get('/api/swarm', (req, res) => {
       countries,
       interfaces,
     },
+    pieceTelemetry,
   });
 });
 

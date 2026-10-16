@@ -2219,5 +2219,337 @@ a {
   font-size: 13px;
 }
 
+.provider-pill {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  border: 1px solid var(--border);
+}
 
+
+/* ------------------------------------------------------------------------- */
+/* Swarm Telemetry Matrix & Piece Frontier Heatmap */
+/* ------------------------------------------------------------------------- */
+.swarm-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.swarm-view-switcher {
+  display: inline-flex;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.view-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.view-toggle-btn:hover {
+  color: var(--text-1);
+}
+
+.view-toggle-btn.is-active {
+  background: var(--surface);
+  color: var(--text-1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.swarm-telemetry-container {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.telemetry-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.frontier-metrics {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.highlight-text {
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.piece-grid-wrapper {
+  background: #090d14;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 10px;
+  position: relative;
+}
+
+.piece-grid-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(6px, 1fr));
+  gap: 3px;
+  height: 48px;
+  align-content: stretch;
+}
+
+.piece-block {
+  border-radius: 1px;
+  transition: background-color 0.2s ease;
+}
+
+.piece-block.is-verified {
+  background: #10b981;
+}
+
+.piece-block.is-downloading {
+  background: #38bdf8;
+  animation: pulseBlock 1.2s infinite ease-in-out;
+}
+
+.piece-block.is-missing {
+  background: #1e293b;
+}
+
+.piece-block.is-streaming-cursor {
+  outline: 2px solid #f59e0b;
+  outline-offset: 1px;
+  z-index: 2;
+}
+
+@keyframes pulseBlock {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+.swarm-rarity-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rarity-label-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.rarity-legend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rarity-legend-box {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.rarity-legend-box.is-rare {
+  background: hsl(15, 80%, 48%);
+}
+
+.rarity-legend-box.is-medium {
+  background: hsl(60, 80%, 48%);
+}
+
+.rarity-legend-box.is-abundant {
+  background: hsl(120, 80%, 48%);
+}
+
+.rarity-track {
+  display: flex;
+  gap: 1px;
+  height: 8px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: #090d14;
+}
+
+.rarity-bar {
+  flex: 1;
+  min-width: 2px;
+  height: 100%;
+}
+
+.grid-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  padding-top: 4px;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-box {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+
+.legend-box.verified {
+  background: #10b981;
+}
+
+.legend-box.downloading {
+  background: #38bdf8;
+}
+
+.legend-box.missing {
+  background: #1e293b;
+}
+
+.cursor-indicator {
+  width: 9px;
+  height: 9px;
+  border: 2px solid #f59e0b;
+  border-radius: 2px;
+}
+
+/* Per-interface cards grid in matrix */
+.interface-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.iface-stat-card {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-top-width: 3px;
+  border-radius: 6px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.iface-stat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.iface-name-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.iface-peers-pill {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+
+.iface-speeds-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.speed-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.iface-protocols-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.proto-stat {
+  display: flex;
+  gap: 6px;
+}
+
+.proto-pill {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.proto-tcp {
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.25);
+}
+
+.proto-utp {
+  background: rgba(168, 85, 247, 0.12);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.25);
+}
+
+.protocol-badge {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.badge-tcp {
+  background: rgba(56, 189, 248, 0.1);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.25);
+}
+
+.badge-utp {
+  background: rgba(168, 85, 247, 0.1);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.25);
+}
+
+.flag-choked {
+  color: #ef4444;
+  font-weight: 600;
+}
+
+.flag-unchoked {
+  color: #10b981;
+  font-weight: 600;
+}
 

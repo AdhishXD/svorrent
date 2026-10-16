@@ -21,6 +21,11 @@ const paths = {
   refresh: <><path d="M2.5 8a5.5 5.5 0 0 1 9.3-3.9L13.5 6" /><path d="M13.5 2.5V6H10" /><path d="M13.5 8a5.5 5.5 0 0 1-9.3 3.9L2.5 10" /><path d="M2.5 13.5V10H6" /></>,
   globe: <><circle cx="8" cy="8" r="6" /><path d="M2 8h12M8 2a9 9 0 0 1 0 12M8 2a9 9 0 0 0 0 12" /></>,
   map: <><polygon points="1 3.5 5.5 1.5 10.5 3.5 15 1.5 15 12.5 10.5 14.5 5.5 12.5 1 14.5" /><line x1="5.5" y1="1.5" x2="5.5" y2="12.5" /><line x1="10.5" y1="3.5" x2="10.5" y2="14.5" /></>,
+  grid: <><rect x="2" y="2" width="5" height="5" rx="0.5" /><rect x="9" y="2" width="5" height="5" rx="0.5" /><rect x="2" y="9" width="5" height="5" rx="0.5" /><rect x="9" y="9" width="5" height="5" rx="0.5" /></>,
+  shield: <path d="M8 1.5 2.5 3.5v5c0 3.5 2.5 5.5 5.5 6 3-0.5 5.5-2.5 5.5-6v-5z" />,
+  settings: <><circle cx="8" cy="8" r="2.5" /><path d="M13.5 8a5.5 5.5 0 0 0-.2-1.3l1.4-1.1-1.3-2.3-1.7.6a5.5 5.5 0 0 0-1.8-1l-.3-1.8H9.6L9.3 3a5.5 5.5 0 0 0-1.8 1l-1.7-.6L4.5 5.6l1.4 1.1A5.5 5.5 0 0 0 5.7 8l-1.4 1.1 1.3 2.3 1.7-.6a5.5 5.5 0 0 0 1.8 1l.3 1.8h2.6l.3-1.8a5.5 5.5 0 0 0 1.8-1l1.7.6 1.3-2.3z" /></>,
+  plus: <path d="M8 3v10M3 8h10" />,
+  layers: <><polygon points="8 1.5 14.5 5 8 8.5 1.5 5 8 1.5" /><polyline points="1.5 8 8 11.5 14.5 8" /><polyline points="1.5 11 8 14.5 14.5 11" /></>,
 };
 
 export function Icon({ name, size = 16, className = '' }) {
