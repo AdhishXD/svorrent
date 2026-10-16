@@ -232,6 +232,42 @@ a {
   background: var(--hover);
 }
 
+.icon-spin {
+  animation: spin 0.45s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Subtle Network Rescan Blip */
+@keyframes subtleBlip {
+  0% {
+    opacity: 1;
+    filter: brightness(1);
+  }
+  30% {
+    opacity: 0.72;
+    filter: brightness(1.18);
+  }
+  100% {
+    opacity: 1;
+    filter: brightness(1);
+  }
+}
+
+.networks-page.blip-flash .network-kpi-grid,
+.networks-page.blip-flash .infographics-panel,
+.networks-page.blip-flash .adapters-list,
+.networks-page.blip-flash .bandwidth-chart-wrap {
+  animation: subtleBlip 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
 .btn-done {
   color: var(--ok);
   border-color: transparent;

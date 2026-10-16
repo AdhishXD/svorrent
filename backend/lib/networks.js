@@ -135,6 +135,15 @@ export class NetworkManager {
     this.hardwarePorts = await getMacHardwarePortNames();
   }
 
+  async rescan() {
+    await Promise.allSettled([
+      this.refreshHardwarePorts(),
+      this.checkUsbTether(),
+    ]);
+    this.tick();
+    return this.getSnapshot();
+  }
+
   hookNetConnect() {
     const originalConnect = net.connect;
     const self = this;

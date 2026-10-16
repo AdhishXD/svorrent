@@ -103,6 +103,8 @@ export function NetworksPage({ notify }) {
   });
   const [loading, setLoading] = useState(true);
   const [peakSpeed, setPeakSpeed] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [blip, setBlip] = useState(false);
 
   const fetchNetworks = useCallback(async () => {
     try {
@@ -118,6 +120,26 @@ export function NetworksPage({ notify }) {
       // Backend may be momentarily restarting
     }
   }, [peakSpeed]);
+
+  const handleManualRefresh = async () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    setBlip(true);
+    try {
+      const snap = await apiGet('/networks?rescan=true');
+      if (snap && Array.isArray(snap.interfaces)) {
+        setData(snap);
+        if (snap.totalDownSpeed > peakSpeed) {
+          setPeakSpeed(snap.totalDownSpeed);
+        }
+      }
+    } catch {
+      // Backend may be momentarily restarting
+    } finally {
+      setTimeout(() => setIsRefreshing(false), 450);
+      setTimeout(() => setBlip(false), 350);
+    }
+  };
 
   useEffect(() => {
     fetchNetworks();
@@ -152,7 +174,7 @@ export function NetworksPage({ notify }) {
   const hasMultiple = bondedCount > 1;
 
   return (
-    <section className="networks-page">
+    <section className={`networks-page ${blip ? 'blip-flash' : ''}`}>
       <div className="page-head">
         <div>
           <h1 className="page-title">Network Aggregation</h1>
@@ -163,11 +185,13 @@ export function NetworksPage({ notify }) {
         <div className="page-actions">
           <button
             id="refresh-networks"
-            className="btn btn-outline"
-            onClick={fetchNetworks}
+            className={`btn btn-outline ${isRefreshing ? 'is-refreshing' : ''}`}
+            onClick={handleManualRefresh}
+            disabled={isRefreshing}
             title="Rescan network adapters"
           >
-            <Icon name="refresh" size={14} /> Refresh Adapters
+            <Icon name="refresh" size={14} className={isRefreshing ? 'icon-spin' : ''} />
+            <span>{isRefreshing ? 'Scanning…' : 'Refresh Adapters'}</span>
           </button>
         </div>
       </div>

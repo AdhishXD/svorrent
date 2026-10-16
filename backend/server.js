@@ -1026,7 +1026,11 @@ app.post('/api/torrent/:id/play', async (req, res) => {
 // Network Aggregation & Multi-Interface Bonding (Inspired by Plexo)
 // ---------------------------------------------------------------------------
 
-app.get('/api/networks', (req, res) => {
+app.get('/api/networks', async (req, res) => {
+  if (req.query.rescan) {
+    const snap = await networkManager.rescan();
+    return res.json(snap);
+  }
   res.json(networkManager.getSnapshot());
 });
 
