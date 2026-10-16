@@ -19,6 +19,22 @@ int main(int argc, char** argv) {
 
     bool once_mode = false;
     for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--list") == 0) {
+            tk_device_info_t devices[8];
+            size_t count = 0;
+            tk_error_t err;
+            memset(&err, 0, sizeof(err));
+            tk_result_t res = tk_list_devices(devices, 8, &count, false, &err);
+            if (res == TK_OK && count > 0) {
+                printf("RNDIS devices found: %zu\n", count);
+                for (size_t d = 0; d < count; ++d) {
+                    printf("[%zu] %04x:%04x - %s\n", d, devices[d].vendor_id, devices[d].product_id, devices[d].description);
+                }
+            } else {
+                printf("No RNDIS devices found.\n");
+            }
+            return 0;
+        }
         if (strcmp(argv[i], "--once") == 0) {
             once_mode = true;
         }

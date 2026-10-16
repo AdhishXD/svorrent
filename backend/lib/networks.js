@@ -5,6 +5,7 @@
 import os from 'node:os';
 import net from 'node:net';
 import path from 'node:path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -12,7 +13,12 @@ import { promisify } from 'node:util';
 const execAsync = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const TETHER_BIN = path.resolve(__dirname, '../bin/tetherkit');
+
+function getTetherDaemonBin() {
+  const privileged = '/Library/PrivilegedHelperTools/svorrent-tetherd';
+  if (fs.existsSync(privileged)) return privileged;
+  return path.resolve(__dirname, '../bin/svorrent-tetherd');
+}
 
 function classifyInterface(name, device) {
   const s = `${name} ${device}`.toLowerCase();
@@ -93,7 +99,8 @@ export class NetworkManager {
 
   async checkUsbTether() {
     try {
-      const { stdout } = await execAsync(`"${TETHER_BIN}" --list`);
+      const tetherBin = getTetherDaemonBin();
+      const { stdout } = await execAsync(`"${tetherBin}" --list`);
       if (stdout.includes('RNDIS devices found:')) {
         let deviceName = 'Android Device';
         if (stdout.includes('04e8:')) deviceName = 'Samsung Galaxy';

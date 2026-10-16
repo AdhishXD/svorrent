@@ -1,16 +1,20 @@
 {
   "name": "backend",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Svorrent BitTorrent daemon and network bonding engine",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "start": "node --openssl-legacy-provider server.js",
+    "build:tether": "make -C tether",
     "setup:tether": "sudo ./scripts/install-tetherd.sh",
     "uninstall:tether": "sudo ./scripts/uninstall-tetherd.sh"
   },
-  "keywords": [],
+  "keywords": ["bittorrent", "network-bonding", "tethering", "streaming"],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "type": "module",
   "dependencies": {
     "bittorrent-peerid": "^2.0.2",

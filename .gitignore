@@ -6,3 +6,11 @@ dist-ssr/
 .env
 .env.*
 !.env.example
+*.log
+*.tmp
+.svorrent/
+build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+
