@@ -360,7 +360,12 @@ function setupTorrentHooks(torrent) {
     if (torrent.pieces && torrent.pieces.length > 0) {
       torrent.select(0, torrent.pieces.length - 1);
       if (typeof torrent.critical === 'function') {
-        torrent.critical(0, Math.min(20, torrent.pieces.length - 1));
+        const lastPiece = torrent.pieces.length - 1;
+        // Prioritize container headers (first 20 pieces) and container footers / moov atom / Cues (last 15-20 pieces)
+        torrent.critical(0, Math.min(20, lastPiece));
+        if (lastPiece > 40) {
+          torrent.critical(Math.max(0, lastPiece - 15), lastPiece);
+        }
       }
     }
     if (torrent.wires) {
