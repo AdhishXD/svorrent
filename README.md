@@ -32,15 +32,15 @@ $$\text{Download ETA} \times 1.20 \le \text{Video Runtime}$$
 - While downloading, the Play button remains disabled and greyed out, with its hover tooltip displaying the exact byte buffer needed and estimated time remaining until continuous playback is guaranteed.
 - Once the 20% safety threshold is satisfied, the Play button activates in cyan. Clicking it executes `open -a VLC <filepath>`, opening the growing file directly in VLC (or the system default media player).
 
-#### 2.3 Per-Torrent Swarm Topology & GeoIP Inspector
-Every download row includes an isolated Swarm Map button opening a per-torrent inspector.
+#### 2.3 Swarm Telemetry Matrix & Peer Inspector
+Every download row includes an isolated Swarm button opening a per-torrent inspector with a dual-view switcher:
 
-![Swarm Map and Topology Inspector](docs/screenshots/swarm_modal.webp)
+![Swarm Telemetry Matrix and Peer Inspector](docs/screenshots/swarm_modal.webp)
 
-- Renders an interactive vector SVG world map plotting peer centroids without WebGL overhead.
-- Maps remote peer IP addresses to countries and cities using an offline `geoip-lite` database.
-- Provides dynamic segmented filters across connected network interfaces (Wi-Fi, USB Tether, Ethernet, Bridges) with color-coded throughput metrics.
-- Displays ranked country contributions and a searchable peer wire table with remote client software identification (qBittorrent, Transmission, Deluge, libtorrent).
+- **Piece Bitfield & Sequential Streaming Frontier**: Renders verified chunk blocks on disk alongside real-time download blocks and the sequential playback frontier cursor.
+- **Swarm Piece Availability Heatmap**: Visualizes piece availability rarity across all connected peers from rare (<25%) to abundant (100%).
+- **Multi-Interface Breakdown & Protocol Badging**: Inspects remote peer connections broken down by local physical adapter (Wi-Fi, USB Tether, Ethernet) with clear TCP vs. uTP (Micro Transport Protocol) and WebRTC badges.
+- **Global GeoIP Topology (Secondary View)**: Toggle over to the interactive vector SVG world map plotting remote peer coordinates and country contributions via offline `geoip-lite`.
 
 ### 3. Multi-Network Pooling & Bandwidth Bonding
 Svorrent lets you combine multiple separate internet connections and pool them together as a single aggregated pipeline to multiply download throughput.
