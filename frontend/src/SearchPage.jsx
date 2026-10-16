@@ -296,7 +296,7 @@ export function SearchPage({ notify, onDownloadAdded, initialQuery }) {
       ) : (
         !error && (
           <p className="empty">
-            Results from The Pirate Bay, LimeTorrents and TorrentProject show up here with automated DoH anti-censorship. Downloads save to{' '}
+            Results from The Pirate Bay, LimeTorrents and TorrentProject show up here. Downloads save to{' '}
             <span className="mono">~/Downloads/Svorrent</span>.
           </p>
         )
