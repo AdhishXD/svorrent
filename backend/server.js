@@ -15,6 +15,7 @@ import { createSession } from './lib/session.js';
 import { NetworkManager } from './lib/networks.js';
 import { TorrentArchive } from './lib/archive.js';
 import { FolderScanner } from './lib/scanner.js';
+import { resolveDoH } from './lib/doh.js';
 import geoip from 'geoip-lite';
 import {
   assessTorrentPlayability,
@@ -443,7 +444,7 @@ async function getOrAddTorrent(magnetURI, opts = {}) {
 // API Routes
 // ---------------------------------------------------------------------------
 
-// 1. Search indexers
+// 1. Search indexers (Plug-and-play public search with automatic DoH anti-censorship)
 app.get('/api/search', async (req, res) => {
   const query = req.query.q;
   if (!query) {
@@ -451,13 +452,23 @@ app.get('/api/search', async (req, res) => {
   }
 
   try {
-    const torrents = await TorrentSearchApi.search(query, 'All', 30);
+    const torrents = await TorrentSearchApi.search(query, 'All', 40);
     const sorted = (torrents || []).sort((a, b) => (parseInt(b.seeds, 10) || 0) - (parseInt(a.seeds, 10) || 0));
     res.json(sorted);
   } catch (error) {
     console.error('Search error:', error);
     res.status(500).json({ error: 'Failed to search torrents' });
   }
+});
+
+app.get('/api/search/doh-check', async (req, res) => {
+  const testHost = req.query.host || 'thepiratebay.org';
+  const ip = await resolveDoH(testHost);
+  res.json({
+    host: testHost,
+    resolvedIp: ip,
+    dohActive: !!ip,
+  });
 });
 
 // 2. Resolve magnet link

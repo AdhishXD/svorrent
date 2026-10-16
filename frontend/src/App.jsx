@@ -136,10 +136,10 @@ function App() {
       </header>
 
       <main className="page">
-        <div hidden={route !== 'search'}>
+        <div style={{ display: route === 'search' ? 'block' : 'none' }}>
           <SearchPage initialQuery={searchTerm} notify={notify} onDownloadAdded={refreshTorrents} />
         </div>
-        {route === 'downloads' && (
+        <div style={{ display: route === 'downloads' ? 'block' : 'none' }}>
           <DownloadsManager
             torrents={downloads}
             setTorrents={setTorrents}
@@ -147,10 +147,10 @@ function App() {
             notify={notify}
             onGoSearch={handleGoSearch}
           />
-        )}
-        {route === 'networks' && (
+        </div>
+        <div style={{ display: route === 'networks' ? 'block' : 'none' }}>
           <NetworksPage notify={notify} />
-        )}
+        </div>
       </main>
 
       {toast && (

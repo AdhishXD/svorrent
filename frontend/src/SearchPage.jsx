@@ -59,7 +59,7 @@ export function SearchPage({ notify, onDownloadAdded, initialQuery }) {
     }
   }, [initialQuery]);
 
-  // Search after the user stops typing for a moment.
+  // Search after user stops typing
   useEffect(() => {
     const term = query.trim();
     clearTimeout(debounce.current);
@@ -68,7 +68,7 @@ export function SearchPage({ notify, onDownloadAdded, initialQuery }) {
     return () => clearTimeout(debounce.current);
   }, [query]);
 
-  // "/" focuses the search field from anywhere on the page.
+  // "/" focuses search field from anywhere on the page
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === '/' && inputRef.current?.offsetParent && document.activeElement?.tagName !== 'INPUT') {
@@ -108,7 +108,6 @@ export function SearchPage({ notify, onDownloadAdded, initialQuery }) {
     if (t.magnet) return t.magnet;
     const params = new URLSearchParams({ provider: t.provider, desc: t.desc || '', link: t.link || '' });
     const data = await apiGet(`/magnet?${params}`);
-    // Cache on the result so later actions skip the lookup.
     setResults((prev) => prev.map((r, i) => (i === t._id ? { ...r, magnet: data.magnet } : r)));
     return data.magnet;
   };
@@ -171,7 +170,7 @@ export function SearchPage({ notify, onDownloadAdded, initialQuery }) {
             id="search-input"
             ref={inputRef}
             type="search"
-            placeholder="Search torrents"
+            placeholder="Search torrents across public indexes..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             autoFocus
@@ -186,6 +185,7 @@ export function SearchPage({ notify, onDownloadAdded, initialQuery }) {
             <kbd className="kbd">/</kbd>
           )}
         </div>
+
         <button id="search-submit" type="submit" className="btn btn-primary" disabled={!query.trim() || loading}>
           Search
         </button>
@@ -202,7 +202,7 @@ export function SearchPage({ notify, onDownloadAdded, initialQuery }) {
             <label className="select-wrap">
               <span className="sr-only">Filter by source</span>
               <select id="source-filter" value={source} onChange={(e) => setSource(e.target.value)}>
-                <option value="all">All sources</option>
+                <option value="all">All sources ({sources.length})</option>
                 {sources.map((s) => (
                   <option key={s} value={s}>
                     {s}
@@ -245,7 +245,9 @@ export function SearchPage({ notify, onDownloadAdded, initialQuery }) {
                     <td className="col-num mono">{t.size || '—'}</td>
                     <td className={`col-num mono ${seedClass(t.seeds || 0)}`}>{t.seeds ?? 0}</td>
                     <td className="col-num mono muted">{t.peers ?? 0}</td>
-                    <td className="col-source muted">{t.provider}</td>
+                    <td className="col-source">
+                      <span className="provider-pill">{t.provider}</span>
+                    </td>
                     <td className="col-actions">
                       <div className="row-actions">
                         <button
@@ -285,7 +287,7 @@ export function SearchPage({ notify, onDownloadAdded, initialQuery }) {
               })}
             </tbody>
           </table>
-          {rows.length === 0 && <p className="empty">No results from this source.</p>}
+          {rows.length === 0 && <p className="empty">No results match the current source filter.</p>}
         </div>
       ) : loading ? (
         <p className="empty">Searching The Pirate Bay, LimeTorrents and TorrentProject…</p>
@@ -294,7 +296,7 @@ export function SearchPage({ notify, onDownloadAdded, initialQuery }) {
       ) : (
         !error && (
           <p className="empty">
-            Results from The Pirate Bay, LimeTorrents and TorrentProject show up here. Downloads are saved to{' '}
+            Results from The Pirate Bay, LimeTorrents and TorrentProject show up here with automated DoH anti-censorship. Downloads save to{' '}
             <span className="mono">~/Downloads/Svorrent</span>.
           </p>
         )
