@@ -219,11 +219,12 @@ flowchart TD
 | Component | Implementation |
 | :--- | :--- |
 | BitTorrent Protocol | WebTorrent, bittorrent-protocol, bittorrent-dht |
-| Network Routing | OS socket binding via local IP assignment |
+| Search Engine | Plug-and-play public index aggregation with automated Cloudflare/Google DoH anti-censorship shield |
+| Network Routing & Bonding | Multi-interface OS socket binding via local IP assignment and dynamic routing table failover |
 | Media Analysis | ffprobe metadata extraction + analytic ETA-vs-runtime buffer formula |
-| Swarm Map | Native SVG with BBox centroid coordinates (zero WebGL) |
+| Swarm Telemetry | Piece bitfield availability heatmap, interface breakdown, and native SVG map |
 | GeoIP Resolution | Offline MaxMind GeoLite database via geoip-lite |
-| UI Framework | React 18, Vite, Vanilla CSS |
+| UI Framework | React 19, Vite, Vanilla CSS |
 
 ---
 
