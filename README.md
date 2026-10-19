@@ -5,7 +5,7 @@
 <h1 align="center">Svorrent</h1>
 
 <p align="center">
-  <b>High-performance, lightweight BitTorrent client with multi-network hardware bonding, sub-second search, sequential media streaming, and real-time swarm telemetry.</b>
+  <b>High-performance, lightweight torrent and P2P streaming client with multi-network hardware bonding, sub-second search, sequential playback, and real-time swarm telemetry.</b>
 </p>
 
 <p align="center">
@@ -18,7 +18,7 @@
 
 ## Downloads (v1.0.0)
 
-Svorrent uses a lightweight web-native client architecture (inspired by BitTorrent Web and Spotify Web Client). Instead of packing a heavy 150MB+ Chromium/Electron runtime, native desktop launchers start a silent background daemon and instantly open the interface in your default web browser.
+Svorrent uses a lightweight web-native client architecture. Instead of bundling a heavy 150MB+ Chromium runtime, native desktop launchers start a silent background daemon and open the interface directly in your default web browser.
 
 | Platform | Package | Size | Description |
 | :--- | :--- | :--- | :--- |
@@ -77,7 +77,7 @@ Svorrent can distribute outgoing peer connections across multiple local interfac
 ![Network Bonding Interface](docs/screenshots/networks.webp)
 
 - **Combined Speed Pooling**: Wi-Fi, cellular tethering, Ethernet, and secondary USB adapters can contribute separate peer connections. Their nominal speeds describe potential capacity; actual torrent speed is not guaranteed to equal their sum.
-- **Kernel-Level Socket Striping**: Because BitTorrent relies on dozens of concurrent peer wires, Svorrent binds discrete outgoing TCP sockets to each physical network adapter's local IP address (`localAddress`). Peer traffic is distributed across all enabled interfaces, pooling bandwidth without requiring paid bonding VPN subscriptions or multi-WAN hardware routers.
+- **Kernel-Level Socket Striping**: Because torrent swarms rely on dozens of concurrent peer wires, Svorrent binds discrete outgoing TCP sockets to each physical network adapter's local IP address (`localAddress`). Peer traffic is distributed across all enabled interfaces, pooling bandwidth without requiring paid bonding VPN subscriptions or multi-WAN hardware routers.
 - **Android USB Tethering (macOS)**: After installing the privileged `svorrent-tetherd` service and enabling USB tethering on a compatible Android phone, the daemon detects an exposed RNDIS device, creates a virtual interface, and requests DHCP configuration. Installation requires administrator authorization and the daemon runs as root.
 - **Per-Adapter Controls & Live Telemetry**: Any interface in the pool can be enabled or disabled on the fly from the Networks dashboard, which displays real-time bandwidth balancing percentages, per-adapter sparklines, and session data counters.
 
@@ -154,7 +154,7 @@ The interface runs on `http://localhost:5173`.
 
 ### 3. Packaging Releases
 
-To build production desktop distributions matching the BitTorrent Web footprint:
+To build production desktop distributions (< 20 MB):
 
 ```bash
 # Build macOS .dmg (outputs to dist-app/Svorrent.dmg)
@@ -184,7 +184,7 @@ flowchart TD
     subgraph Server["Backend Core (Express :3001)"]
         API["REST API Router<br/>(/api/search, /api/torrents, /api/networks, /api/play)"]
         
-        subgraph TorrentEngine["BitTorrent Engine"]
+        subgraph TorrentEngine["Torrent Engine"]
             WT["WebTorrent Client<br/>(Sequential piece priority & chunk assembly)"]
             Bitfield["Bitfield Analyzer<br/>(8-bit popcount table & completion state)"]
             Session["Session Manager<br/>(Fast-resume checkpoints & disk reconciliation)"]
@@ -258,7 +258,7 @@ flowchart TD
 
 | Component | Implementation |
 | :--- | :--- |
-| BitTorrent Protocol | WebTorrent, bittorrent-protocol, bittorrent-dht |
+| Core Protocol & Swarm | WebTorrent, P2P Wire Protocol, DHT |
 | Desktop Architecture | Native Win32 / macOS browser-client launchers (< 20 MB footprint, no Electron overhead) |
 | Search Engine | Multi-provider aggregation with bounded timeouts & DoH anti-censorship shield |
 | Network Routing & Bonding | Multi-interface OS socket binding via local IP assignment and dynamic routing table failover |
