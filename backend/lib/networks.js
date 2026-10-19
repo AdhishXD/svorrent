@@ -4,6 +4,7 @@
 
 import os from 'node:os';
 import net from 'node:net';
+import dgram from 'node:dgram';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -92,6 +93,9 @@ export class NetworkManager {
         this.refreshHardwarePorts();
         this.checkUsbTether();
       }
+      if (this.tickCount % 3 === 0) {
+        this.sendHeartbeat();
+      }
       this.tick();
     }, 1000);
     this.intervalId.unref?.();
@@ -131,6 +135,28 @@ export class NetworkManager {
       this.isTetherDaemonRunning = !!pgrepOut.trim();
     } catch {
       this.isTetherDaemonRunning = false;
+    }
+  }
+
+  // Keep-alive heartbeat: sends a tiny UDP packet from each cellular/tethered
+  // interface to prevent iOS from powering down Personal Hotspot due to idle.
+  sendHeartbeat() {
+    const ifaces = this.getAllInterfaces();
+    for (const iface of ifaces) {
+      if (this.disabledIds.has(iface.id)) continue;
+      // Only heartbeat non-wifi interfaces (cellular, tether, USB hotspot)
+      if (iface.type === 'wifi' || iface.type === 'bridge') continue;
+      if (!iface.ip || !iface.connected) continue;
+      try {
+        const sock = dgram.createSocket('udp4');
+        sock.bind(0, iface.ip, () => {
+          // Send a single null byte to Cloudflare DNS — harmless, instant, ~zero data
+          sock.send(Buffer.alloc(1), 53, '1.1.1.1', () => {
+            try { sock.close(); } catch {}
+          });
+        });
+        sock.on('error', () => { try { sock.close(); } catch {} });
+      } catch {}
     }
   }
 
