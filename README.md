@@ -192,46 +192,43 @@ The following diagram details the interconnectivity between the client interface
 
 ```mermaid
 flowchart TD
-    subgraph Client["Frontend Client (React :5173)"]
-        UI_Search["Search Engine<br/>(Query dispatch & tracker deduplication)"]
-        UI_Queue["Downloads Manager<br/>(Progress, playability tooltips & VLC triggers)"]
+    subgraph Client["Frontend Client (React UI — Embedded :3001 / Dev :5173)"]
+        UI_Search["Search Engine<br/>(Query dispatch & deduplication)"]
+        UI_Queue["Downloads Manager<br/>(Progress, playability hover & stream controls)"]
         UI_Details["Torrent Details<br/>(Tracker list, piece map, file tree)"]
         UI_Swarm["Swarm Modal<br/>(SVG vector map, piece availability & peer table)"]
         UI_Net["Network Monitor<br/>(Adapter status & traffic sparklines)"]
     end
 
     subgraph Server["Backend Core (Express :3001)"]
+        Firewall["Loopback Firewall<br/>(local-access.js origin & host validation)"]
         API["REST API Router<br/>(/api/search, /api/torrents, /api/networks, /api/play)"]
-        
-        subgraph SecLayer["Security & Sandboxing"]
-            Firewall["Loopback Firewall<br/>(Origin & host header validation)"]
-            SafePath["SafePath Sandbox<br/>(Directory traversal containment)"]
-            DoH["DoH Resolver<br/>(Anti-censorship tracker resolution)"]
-        end
+        SafePath["SafePath Sandbox<br/>(safe-path.js traversal containment)"]
+        DoH["DoH Resolver<br/>(doh.js anti-censorship DNS)"]
 
         subgraph TorrentEngine["Torrent Engine"]
             WT["WebTorrent Client<br/>(Sequential piece priority & chunk assembly)"]
             Bitfield["Bitfield Analyzer<br/>(8-bit popcount table & completion state)"]
-            Session["Session Manager<br/>(Fast-resume checkpoints & disk reconciliation)"]
+            Session["Session Manager<br/>(Fast-resume checkpoints & disk sync)"]
         end
 
         subgraph MediaEngine["Buffer-Free Playability Engine"]
+            Calc["Dynamic Buffer & ETA Evaluator<br/>(playability.js throughput EMA & streaming gate)"]
             Probe["ffprobe Metadata Extractor<br/>(Container runtime & bitrate inspection)"]
-            Calc["Dynamic Buffer & ETA Evaluator<br/>(Throughput EMA & streaming gate)"]
             Launcher["Player Spawn Controller<br/>(Native VLC execution via OS process)"]
         end
 
-        subgraph NetLayer["Multi-Network Bonding Layer"]
+        subgraph NetLayer["Multi-Network Bonding Layer (networks.js)"]
             NetMgr["Interface Coordinator<br/>(Adapter discovery & IP binding registry)"]
             SocketHook["Socket Interceptor<br/>(net.connect localAddress striping)"]
-            Keepalive["iOS Hotspot Keepalive<br/>(Proactive UDP heartbeats)"]
+            Keepalive["Cellular Keepalive<br/>(Proactive UDP heartbeats)"]
             Telemetry["Traffic Accounting<br/>(Per-adapter upload & download distribution)"]
         end
     end
 
     subgraph OS["Operating System & Local Resources"]
         IF_WiFi["Wi-Fi Adapter (en0)"]
-        IF_Tether["Android USB Tether (feth)<br/>(svorrent-tetherd / RNDIS)"]
+        IF_Tether["USB Cellular Tether (feth)<br/>(svorrent-tetherd / RNDIS)"]
         IF_Eth["Ethernet / Secondary (en1)"]
         Disk["Filesystem Storage<br/>(~/Downloads/Svorrent/)"]
         VLC["VLC Media Player"]
@@ -242,37 +239,44 @@ flowchart TD
         Peers["Distributed Peer Swarm"]
     end
 
-    %% Frontend to Backend interactions
-    UI_Search -->|Dispatch search query| API
-    UI_Queue -->|Poll torrent telemetry| API
-    UI_Queue -->|Trigger safe playback| API
-    UI_Details -->|Fetch file tree & trackers| API
-    UI_Swarm -->|Request peer & GeoIP metrics| API
-    UI_Net -->|Fetch adapter throughput| API
+    %% Inbound Security & Request Routing
+    UI_Search -->|Dispatch query| Firewall
+    UI_Queue -->|Poll telemetry & stream triggers| Firewall
+    UI_Details -->|Fetch file tree & trackers| Firewall
+    UI_Swarm -->|Request peer & GeoIP metrics| Firewall
+    UI_Net -->|Fetch adapter throughput| Firewall
 
-    %% Backend internal orchestration
-    API --> Firewall
-    Firewall --> SafePath
-    API --> WT
-    API --> NetMgr
-    API --> MediaEngine
-    
+    Firewall -->|Validate loopback 127.0.0.1| API
+    API -->|Sanitize file paths| SafePath
+    SafePath <-->|Guarded read / write| Disk
+
+    %% API Dispatches to Subsystems
+    API -->|Torrent lifecycle & magnet addition| WT
+    API -->|Adapter state & toggle control| NetMgr
+    API -->|Streaming playability requests| Calc
+    API -->|Anti-censorship DNS lookups| DoH
+
+    %% Torrent Engine orchestration
     WT --> Bitfield
     WT --> Session
     Session <--> Disk
     WT --> Disk
+    DoH -->|Resolve announce hostnames| Trackers
+    WT -->|Announce & scrape| Trackers
 
     %% Playability flow
-    MediaEngine --> Probe
-    Probe --> Disk
-    Probe --> Calc
-    Calc -->|Threshold satisfied| Launcher
+    Calc -->|Inspect media header & bitrate| Probe
+    Probe <--> Disk
+    Calc -->|Streaming gate satisfied| Launcher
     Launcher -->|Spawn process| VLC
 
     %% Multi-network socket routing
-    NetMgr --> SocketHook
-    NetMgr --> Telemetry
-    SocketHook --> Keepalive
+    NetMgr -->|Round-robin assignment| SocketHook
+    NetMgr -->|Cellular heartbeat| Keepalive
+    NetMgr -->|Track bytes in & out| Telemetry
+    Keepalive -->|Keep link active| IF_Tether
+
+    WT -->|Initiate peer socket| SocketHook
     SocketHook -->|Bind socket IP| IF_WiFi
     SocketHook -->|Bind socket IP| IF_Tether
     SocketHook -->|Bind socket IP| IF_Eth
@@ -281,7 +285,6 @@ flowchart TD
     IF_WiFi -->|TCP Peer Wire| Peers
     IF_Tether -->|TCP Peer Wire| Peers
     IF_Eth -->|TCP Peer Wire| Peers
-    WT -->|Announce & scrape via DoH| Trackers
 ```
 
 ---
