@@ -2,18 +2,22 @@ import { useEffect, useRef } from 'react';
 
 // Keep keyboard focus inside the active dialog and return it to its trigger.
 const openDialogs = [];
+let originalOverflow = '';
 export function useDialog(open, onClose, busy = false) {
   const ref = useRef(null);
   const close = useRef(onClose);
   const blocked = useRef(busy);
-  close.current = onClose;
-  blocked.current = busy;
+
+  useEffect(() => {
+    close.current = onClose;
+    blocked.current = busy;
+  }, [onClose, busy]);
 
   useEffect(() => {
     const dialog = ref.current;
     if (!open || !dialog) return;
     const trigger = document.activeElement;
-    const overflow = document.body.style.overflow;
+    if (openDialogs.length === 0) originalOverflow = document.body.style.overflow;
     openDialogs.push(dialog);
     document.body.style.overflow = 'hidden';
     const focusable = () => [...dialog.querySelectorAll(
@@ -42,8 +46,9 @@ export function useDialog(open, onClose, busy = false) {
     document.addEventListener('keydown', onKey, true);
     return () => {
       document.removeEventListener('keydown', onKey, true);
-      openDialogs.splice(openDialogs.indexOf(dialog), 1);
-      document.body.style.overflow = overflow;
+      const index = openDialogs.indexOf(dialog);
+      if (index !== -1) openDialogs.splice(index, 1);
+      if (openDialogs.length === 0) document.body.style.overflow = originalOverflow;
       if (trigger?.isConnected) trigger.focus();
     };
   }, [open]);

@@ -266,7 +266,7 @@ export function SearchPage({ notify, onDownloadAdded, initialQuery, isActive = t
             ref={inputRef}
             type="search"
             aria-label="Search torrents"
-            placeholder="Search torrents across public indexes..."
+            placeholder="Search torrents by name…"
             value={query}
             onChange={(e) => {
               if (!e.target.value) return clear();
@@ -394,13 +394,13 @@ export function SearchPage({ notify, onDownloadAdded, initialQuery, isActive = t
           {rows.length === 0 && <p className="empty">No results match the current source filter.</p>}
         </div>
       ) : loading ? (
-        <p className="empty" role="status">Searching public torrent indexes…</p>
+        <p className="empty" role="status">Searching…</p>
       ) : !error && searchedTerm && query.trim() ? (
         <p className="empty" role="status">Nothing found for “{searchedTerm}”. Try fewer or different keywords.</p>
       ) : (
         !error && (
           <p className="empty">
-            Search public torrent indexes by name. Choose a result to download or copy its magnet link.
+            Search by name. Choose a result to download or copy its magnet link.
           </p>
         )
       )}

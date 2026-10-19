@@ -12,7 +12,7 @@ export function SwarmWorldMap({
   const containerRef = useRef(null);
   const [centroids, setCentroids] = useState({});
   const [hoveredCountry, setHoveredCountry] = useState(null);
-  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0, width: 260 });
 
   // Filter peers by selected interface if applicable
   const filteredPeers = useMemo(() => {
@@ -136,6 +136,7 @@ export function SwarmWorldMap({
       setMousePos({
         x: e.clientX - rect.left,
         y: e.clientY - rect.top,
+        width: rect.width,
       });
     }
   };
@@ -309,7 +310,7 @@ export function SwarmWorldMap({
         <div
           className="swarm-tooltip"
           style={{
-            left: `${Math.max(8, Math.min((containerRef.current?.clientWidth || 260) - 238, mousePos.x + 14))}px`,
+            left: `${Math.max(8, Math.min(mousePos.width - 238, mousePos.x + 14))}px`,
             top: `${Math.max(16, mousePos.y - 70)}px`,
           }}
         >

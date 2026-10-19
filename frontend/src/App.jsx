@@ -201,7 +201,7 @@ function App() {
           />
         </div>
         <div style={{ display: route === 'networks' ? 'block' : 'none' }}>
-          <NetworksPage notify={notify} />
+          <NetworksPage notify={notify} isActive={route === 'networks'} />
         </div>
       </main>
 

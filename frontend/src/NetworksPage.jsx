@@ -92,7 +92,7 @@ function BandwidthAreaChart({ data = [], height = 72, peakSpeed = 0 }) {
   );
 }
 
-export function NetworksPage({ notify }) {
+export function NetworksPage({ notify, isActive = true }) {
   const [data, setData] = useState({
     interfaces: [],
     totalDownSpeed: 0,
@@ -115,6 +115,7 @@ export function NetworksPage({ notify }) {
   }, [notify]);
 
   useEffect(() => {
+    if (!isActive) return;
     let disposed = false;
     let timer;
     let currentRequest = null;
@@ -166,7 +167,7 @@ export function NetworksPage({ notify }) {
       currentRequest?.controller.abort();
       requestRef.current = null;
     };
-  }, []);
+  }, [isActive]);
 
   const isRefreshing = pendingAction === 'refresh';
 

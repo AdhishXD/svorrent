@@ -8,6 +8,7 @@
   },
   "scripts": {
     "start": "node --openssl-legacy-provider server.js",
+    "test": "node --test",
     "build:dmg": "../scripts/build-dmg.sh",
     "build:win": "../scripts/build-windows.sh",
     "build:tether": "make -C tether",
@@ -20,7 +21,6 @@
   "type": "module",
   "dependencies": {
     "bittorrent-peerid": "^2.0.2",
-    "cors": "^2.8.6",
     "express": "^5.2.1",
     "geoip-lite": "^2.0.3",
     "torrent-search-api": "^2.1.4",

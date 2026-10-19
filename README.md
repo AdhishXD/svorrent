@@ -5,7 +5,7 @@
 <h1 align="center">Svorrent</h1>
 
 <p align="center">
-  <b>High-performance, lightweight torrent and P2P streaming client with multi-network hardware bonding, sub-second search, sequential playback, and real-time swarm telemetry.</b>
+  <b>A desktop BitTorrent client with search, downloads, local media playback, and network and peer diagnostics.</b>
 </p>
 
 <p align="center">
@@ -18,7 +18,7 @@
 
 ## Downloads (v1.0.0)
 
-Svorrent uses a lightweight web-native client architecture. Instead of bundling a heavy 150MB+ Chromium runtime, native desktop launchers start a silent background daemon and open the interface directly in your default web browser.
+Svorrent uses a local web interface. Desktop launchers start the backend and open the interface in your default browser. Node.js 18 or newer is required; the current packages do not bundle it.
 
 | Platform | Package | Size | Description |
 | :--- | :--- | :--- | :--- |
@@ -30,15 +30,15 @@ Svorrent uses a lightweight web-native client architecture. Instead of bundling 
 
 ## Features & Interface Workflow
 
-### 1. Multi-Tracker Search Aggregation
-The search interface aggregates results concurrently across public indexers (including The Pirate Bay, LimeTorrents, and TorrentProject) with bounded 2.5s provider timeouts.
+### 1. Torrent Search
+The search interface currently uses The Pirate Bay provider with a bounded request timeout.
 - Queries are deduplicated, normalized, and sortable by seeds, leechers, file size, or indexer source.
 - Magnets launch directly into the download pipeline with a single click.
 
 ![Search Interface](docs/screenshots/search.webp)
 
 ### 2. Downloads Manager & Streaming Controls
-The downloads dashboard manages active transfers, sequential chunk scheduling, and instant media playback.
+The downloads dashboard manages active transfers and can open a playable local video in an installed media player.
 
 ![Downloads Manager](docs/screenshots/downloads.webp)
 
@@ -53,13 +53,13 @@ The downloads dashboard manages active transfers, sequential chunk scheduling, a
 - Option to remove torrent metadata only or permanently delete all associated files and downloaded folders from disk (`~/Downloads/Svorrent/`).
 - Invalidation hooks immediately clear file scanner caches and purge persisted session checkpoints.
 
-#### 2.3 Playback Readiness & VLC Integration
-Instead of waiting for an entire file to finish downloading, Svorrent continuously evaluates the physical streaming condition:
+#### 2.3 Playback Readiness & Media Player Integration
+Before enabling playback of an incomplete file, Svorrent estimates whether the remaining download can finish within the video's runtime:
 $$\text{Download ETA} \times 1.20 \le \text{Video Runtime}$$
 
 - Media container runtimes are extracted in the background via `ffprobe` (or estimated from container size if unprobed).
 - While downloading, the Play button remains disabled and greyed out until the readiness estimate passes, with its hover tooltip displaying estimated buffering requirements.
-- Once the 20% safety threshold is satisfied, the Play button activates in cyan. Clicking it executes `open -a VLC <filepath>` (macOS) or launches VLC / system default media player (Windows), opening the growing file directly.
+- Once the estimate passes, the Play button can open the growing file in VLC or the system's default media player. This is an estimate, not a guarantee against buffering; the source's codec and container must also be supported by the player.
 
 #### 2.4 Swarm Telemetry Matrix & Peer Inspector
 Every download row includes an isolated Swarm button opening a per-torrent inspector with a dual-view switcher:
@@ -77,7 +77,7 @@ Svorrent can distribute outgoing peer connections across multiple local interfac
 ![Network Bonding Interface](docs/screenshots/networks.webp)
 
 - **Combined Speed Pooling**: Wi-Fi, cellular tethering, Ethernet, and secondary USB adapters can contribute separate peer connections. Their nominal speeds describe potential capacity; actual torrent speed is not guaranteed to equal their sum.
-- **Kernel-Level Socket Striping**: Because torrent swarms rely on dozens of concurrent peer wires, Svorrent binds discrete outgoing TCP sockets to each physical network adapter's local IP address (`localAddress`). Peer traffic is distributed across all enabled interfaces, pooling bandwidth without requiring paid bonding VPN subscriptions or multi-WAN hardware routers.
+- **Per-Connection Routing**: Svorrent binds outgoing TCP peer sockets to enabled adapters' local IP addresses. This can spread peer traffic across available interfaces, but does not combine them into a single connection or guarantee faster downloads.
 - **Android USB Tethering (macOS)**: After installing the privileged `svorrent-tetherd` service and enabling USB tethering on a compatible Android phone, the daemon detects an exposed RNDIS device, creates a virtual interface, and requests DHCP configuration. Installation requires administrator authorization and the daemon runs as root.
 - **Per-Adapter Controls & Live Telemetry**: Any interface in the pool can be enabled or disabled on the fly from the Networks dashboard, which displays real-time bandwidth balancing percentages, per-adapter sparklines, and session data counters.
 

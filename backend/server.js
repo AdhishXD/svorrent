@@ -1,5 +1,4 @@
 import express from 'express';
-import cors from 'cors';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -21,6 +20,8 @@ import { TorrentArchive } from './lib/archive.js';
 import { FolderScanner } from './lib/scanner.js';
 import { resolveDoH } from './lib/doh.js';
 import { cleanMagnet, extractInfoHash, waitForInfoHash, setTorrentPaused } from './lib/torrents.js';
+import { localAccess } from './lib/local-access.js';
+import { childPath, hasSafeParent } from './lib/safe-path.js';
 import geoip from 'geoip-lite';
 import {
   assessTorrentPlayability,
@@ -124,6 +125,7 @@ function getPeerGeo(remoteIp) {
 
 const app = express();
 const port = process.env.PORT || 3001;
+const host = '127.0.0.1';
 
 // Default download folder: ~/Downloads/Svorrent
 const DOWNLOAD_DIR = path.join(os.homedir(), 'Downloads', 'Svorrent');
@@ -306,10 +308,12 @@ async function shutdownCleanup() {
 process.on('SIGINT', shutdownCleanup);
 process.on('SIGTERM', shutdownCleanup);
 
-app.use(cors());
+// This daemon can read and delete local files. Do not expose it to the LAN or
+// permit an arbitrary website to call its unauthenticated API through a browser.
+app.use(localAccess);
 app.use(express.json());
 
-// Enable verified high-speed public search indexers
+// Keep the configured provider explicit so unavailable indexes do not delay search.
 TorrentSearchApi.disableAllProviders();
 TorrentSearchApi.enableProvider('ThePirateBay');
 
@@ -463,7 +467,7 @@ async function addTorrent(magnetURI, opts = {}) {
 // API Routes
 // ---------------------------------------------------------------------------
 
-// 1. Search indexers (Fast parallel provider dispatch with strict timeouts)
+// 1. Search enabled indexers with bounded provider timeouts
 app.get('/api/search', async (req, res) => {
   const query = req.query.q;
   if (!query) {
@@ -944,14 +948,23 @@ app.post('/api/torrent/:id/delete', async (req, res) => {
 
   const torrentName = torrent.name;
   const basePath = torrent.path ? torrent.path : DOWNLOAD_DIR;
-  const targetPath = torrentName ? path.join(basePath, torrentName) : null;
-  const filePaths = (torrent.files || []).map((f) => path.join(basePath, f.path));
+  const targetPath = torrentName ? childPath(basePath, torrentName) : null;
+  const filePaths = (torrent.files || []).map((f) => childPath(basePath, f.path));
+
+  if (deleteFiles && ((torrentName && !targetPath) ||
+      (!targetPath && filePaths.length === 0) || filePaths.some((fp) => !fp))) {
+    return res.status(400).json({ error: 'Torrent contains an unsafe file path' });
+  }
+  if (deleteFiles && [targetPath, ...filePaths].some((fp) => fp && fs.existsSync(fp) &&
+      !hasSafeParent(basePath, fp))) {
+    return res.status(400).json({ error: 'Torrent file resolves outside its download folder' });
+  }
 
   if (deleteFiles) {
     archive.remove(req.params.id);
   }
 
-  torrent.destroy({ destroyStore: !!deleteFiles }, () => {
+  torrent.destroy({ destroyStore: false }, () => {
     if (deleteFiles) {
       try {
         if (targetPath && fs.existsSync(targetPath)) {
@@ -987,11 +1000,11 @@ app.post('/api/torrent/:id/open-finder', async (req, res) => {
     const largestFile = torrent.files?.length
       ? torrent.files.reduce((a, b) => (a.length > b.length ? a : b))
       : null;
-    const candidateFile = largestFile?.path ? path.join(basePath, largestFile.path) : null;
+    const candidateFile = largestFile?.path ? childPath(basePath, largestFile.path) : null;
     targetFile = candidateFile && fs.existsSync(candidateFile) ? candidateFile : null;
   } else if (req.params.id && req.params.id !== 'root') {
-    const candidate = path.join(DOWNLOAD_DIR, req.params.id);
-    if (fs.existsSync(candidate)) {
+    const candidate = childPath(DOWNLOAD_DIR, req.params.id);
+    if (candidate && fs.existsSync(candidate)) {
       targetFile = candidate;
     }
   }
@@ -1197,7 +1210,7 @@ if (frontendDist) {
 // Server Initialization
 // ---------------------------------------------------------------------------
 
-const httpServer = app.listen(port, () => {
+const httpServer = app.listen(port, host, () => {
   console.log(`Svorrent API running on http://localhost:${port}`);
   console.log(`Native downloads directory: ${DOWNLOAD_DIR}`);
   restoreSession().catch((err) => console.error('[session] restore error:', err.message)).finally(() => {

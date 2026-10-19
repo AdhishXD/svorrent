@@ -138,24 +138,29 @@ export class NetworkManager {
     }
   }
 
-  // Keep-alive heartbeat: sends a tiny UDP packet from each cellular/tethered
-  // interface to prevent iOS from powering down Personal Hotspot due to idle.
+  // Keep active cellular tether links from becoming idle. Other interfaces do
+  // not need this traffic, and a keepalive cannot guarantee carrier behavior.
   sendHeartbeat() {
+    const hasActiveTorrent = this.getClient()?.torrents?.some(
+      (torrent) => !torrent.destroyed && !torrent.paused && !torrent._pausedManually,
+    );
+    if (!hasActiveTorrent) return;
     const ifaces = this.getAllInterfaces();
     for (const iface of ifaces) {
       if (this.disabledIds.has(iface.id)) continue;
-      // Only heartbeat non-wifi interfaces (cellular, tether, USB hotspot)
-      if (iface.type === 'wifi' || iface.type === 'bridge') continue;
+      if (iface.type !== 'cellular') continue;
       if (!iface.ip || !iface.connected) continue;
       try {
         const sock = dgram.createSocket('udp4');
+        const close = () => { try { sock.close(); } catch {} };
+        const timer = setTimeout(close, 2000);
+        timer.unref?.();
+        sock.once('close', () => clearTimeout(timer));
+        sock.once('error', close);
         sock.bind(0, iface.ip, () => {
-          // Send a single null byte to Cloudflare DNS — harmless, instant, ~zero data
-          sock.send(Buffer.alloc(1), 53, '1.1.1.1', () => {
-            try { sock.close(); } catch {}
-          });
+          // Small keepalive request; the timeout also closes stalled sockets.
+          sock.send(Buffer.alloc(1), 53, '1.1.1.1', close);
         });
-        sock.on('error', () => { try { sock.close(); } catch {} });
       } catch {}
     }
   }
@@ -187,7 +192,10 @@ export class NetworkManager {
         const port = opts;
         const host = typeof args[1] === 'string' ? args[1] : 'localhost';
         cb = typeof args[1] === 'function' ? args[1] : args[2];
-        chosen = net.isIPv4(host) && !host.startsWith('127.') ? self.pickInterface() : null;
+        // Do not reroute ordinary HTTP(S) requests used by search, trackers,
+        // update checks, and other services through a possibly offline adapter.
+        chosen = port !== 80 && port !== 443 && net.isIPv4(host) && !host.startsWith('127.')
+          ? self.pickInterface() : null;
         opts = { port, host };
         if (chosen && chosen.ip) {
           opts.localAddress = chosen.ip;
@@ -200,7 +208,8 @@ export class NetworkManager {
       } else if (opts && typeof opts === 'object') {
         // Interfaces currently carry IPv4 addresses. Never bind IPv6, loopback,
         // Unix sockets or hostname-based service requests to one of those.
-        if (!opts.path && opts.port && !opts.localAddress && net.isIPv4(opts.host) && !opts.host.startsWith('127.')) {
+        if (!opts.path && opts.port && Number(opts.port) !== 80 && Number(opts.port) !== 443 &&
+            !opts.localAddress && net.isIPv4(opts.host) && !opts.host.startsWith('127.')) {
           chosen = self.pickInterface();
           if (chosen && chosen.ip) {
             opts = { ...opts, localAddress: chosen.ip };

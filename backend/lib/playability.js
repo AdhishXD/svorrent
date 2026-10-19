@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFile, spawn } from 'node:child_process';
+import { childPath } from './safe-path.js';
 
 // Common playable video container extensions
 export const VIDEO_EXTENSIONS = new Set([
@@ -120,7 +121,8 @@ export function findPrimaryVideoInTorrent(torrent, downloadDir) {
 
   // Choose the largest video file (main film / episode)
   const largest = videoFiles.reduce((a, b) => ((a.length || 0) > (b.length || 0) ? a : b));
-  const fullPath = path.join(basePath, largest.path || largest.name);
+  const fullPath = childPath(basePath, largest.path || largest.name);
+  if (!fullPath) return null;
 
   return {
     file: largest,
