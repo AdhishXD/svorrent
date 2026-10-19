@@ -141,6 +141,8 @@ npm start
 ```
 
 The API service runs on `http://localhost:3001`. Downloads are written to `~/Downloads/Svorrent/`.
+For isolated local testing, `SVORRENT_DOWNLOAD_DIR` and `SVORRENT_DATA_DIR` can override those paths. Set `SVORRENT_DISABLE_PUBLIC_DISCOVERY=1` to disable DHT and bundled public trackers while retaining trackers supplied by a magnet link.
+With `ffmpeg` installed, run `cd backend && npm run test:e2e` for a synthetic, loopback-only torrent transfer, player launch, and cleanup check. The test uses a temporary download folder and does not touch `~/Downloads/Svorrent`.
 
 ### 2. Frontend Setup
 

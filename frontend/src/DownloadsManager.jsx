@@ -3,7 +3,7 @@ import { useDialog } from './useDialog';
 import { TorrentDetails } from './TorrentDetails';
 import { SwarmModal } from './SwarmModal';
 import { Icon } from './Icon';
-import { apiPost, formatBytes, formatEta, formatSpeed } from './lib';
+import { apiGet, apiPost, formatBytes, formatEta, formatSpeed } from './lib';
 
 const FILTERS = [
   { key: 'all', label: 'All' },
@@ -25,6 +25,7 @@ function statusOf(t) {
 }
 
 export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoSearch }) {
+  const [downloadDir, setDownloadDir] = useState(null);
   const [filter, setFilter] = useState('all');
   const [detailsId, setDetailsId] = useState(null);
   const [swarmTorrent, setSwarmTorrent] = useState(null);
@@ -39,6 +40,16 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
   const openedFromHash = useRef(false);
   const pendingActions = useRef(new Set());
   const [pending, setPending] = useState(new Set());
+
+  useEffect(() => {
+    let active = true;
+    apiGet('/config').then((config) => {
+      if (active && typeof config.downloadDir === 'string') setDownloadDir(config.downloadDir);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, []);
+
+  const location = downloadDir || 'the download folder';
 
   const runAction = async (id, action) => {
     if (pendingActions.current.has(id)) return;
@@ -185,7 +196,7 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
         <div>
           <h1 className="page-title">Downloads</h1>
           <p className="page-sub">
-            Saved to <span className="mono">~/Downloads/Svorrent</span>
+            Saved to <span className="mono">{location}</span>
           </p>
         </div>
         <div className="page-actions">
@@ -204,7 +215,7 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
             id="open-downloads-folder"
             className="btn btn-outline"
             onClick={() => reveal('root')}
-            title="Open ~/Downloads/Svorrent in Finder"
+            title={`Open ${location} in Finder`}
           >
             <Icon name="folder" size={14} /> Open folder
           </button>
@@ -470,7 +481,7 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
             </div>
             <form onSubmit={handleResumeMagnetSubmit} className="modal-body">
               <p className="modal-desc muted">
-                Paste a magnet link or info hash. Existing files in <span className="mono">~/Downloads/Svorrent</span> will be checked before missing pieces are downloaded.
+                Paste a magnet link or info hash. Existing files in <span className="mono">{location}</span> will be checked before missing pieces are downloaded.
               </p>
               <div className="field">
                 <input
@@ -550,7 +561,7 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
                 <div className="delete-impact-notice is-danger">
                   <Icon name="alert" size={15} />
                   <span>
-                    This permanently deletes the item from <span className="mono">~/Downloads/Svorrent</span>. It cannot be undone.
+                    This permanently deletes the item from <span className="mono">{location}</span>. It cannot be undone.
                   </span>
                 </div>
               ) : (
@@ -566,7 +577,7 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
                     <div className="delete-disk-label">
                       <span className="delete-disk-title">Also delete downloaded files from disk</span>
                       <span className="delete-disk-sub">
-                        Permanently erases all downloaded files for this torrent from <span className="mono">~/Downloads/Svorrent</span>.
+                        Permanently erases all downloaded files for this torrent from <span className="mono">{location}</span>.
                       </span>
                     </div>
                   </label>

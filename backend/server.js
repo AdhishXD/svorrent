@@ -128,7 +128,7 @@ const port = process.env.PORT || 3001;
 const host = '127.0.0.1';
 
 // Default download folder: ~/Downloads/Svorrent
-const DOWNLOAD_DIR = path.join(os.homedir(), 'Downloads', 'Svorrent');
+const DOWNLOAD_DIR = path.resolve(process.env.SVORRENT_DOWNLOAD_DIR || path.join(os.homedir(), 'Downloads', 'Svorrent'));
 function ensureDownloadDir() {
   if (!fs.existsSync(DOWNLOAD_DIR)) {
     fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
@@ -136,8 +136,9 @@ function ensureDownloadDir() {
 }
 
 // App data (session, tracker cache) lives in ~/.svorrent
-const DATA_DIR = path.join(os.homedir(), '.svorrent');
-const TRACKERS = createTrackerList(DATA_DIR);
+const DATA_DIR = path.resolve(process.env.SVORRENT_DATA_DIR || path.join(os.homedir(), '.svorrent'));
+const disablePublicDiscovery = process.env.SVORRENT_DISABLE_PUBLIC_DISCOVERY === '1';
+const TRACKERS = disablePublicDiscovery ? [] : createTrackerList(DATA_DIR);
 
 // ---------------------------------------------------------------------------
 // BitTorrent Engine Configuration
@@ -172,7 +173,7 @@ const client = new WebTorrent({
   maxConns: BASE_MAX_CONNS,
   torrentPort: TORRENT_PORT,
   dhtPort: TORRENT_PORT ? TORRENT_PORT + 1 : 0,
-  dht: true,
+  dht: !disablePublicDiscovery,
   // Plexo architecture patterns for multi-interface bonding:
   utp: false, // Must be false: uTP UDP sockets bypass TCP localAddress binding; TCP guarantees per-interface routing
   webSeeds: false, // Disable web seeds so HTTP doesn't bypass multi-interface socket striping
@@ -312,6 +313,14 @@ process.on('SIGTERM', shutdownCleanup);
 // permit an arbitrary website to call its unauthenticated API through a browser.
 app.use(localAccess);
 app.use(express.json());
+
+app.get('/api/config', (_req, res) => {
+  const home = os.homedir();
+  const downloadDir = DOWNLOAD_DIR.startsWith(`${home}${path.sep}`)
+    ? `~${DOWNLOAD_DIR.slice(home.length)}`
+    : DOWNLOAD_DIR;
+  res.json({ downloadDir });
+});
 
 // Keep the configured provider explicit so unavailable indexes do not delay search.
 TorrentSearchApi.disableAllProviders();

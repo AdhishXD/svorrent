@@ -9,6 +9,7 @@
   "scripts": {
     "start": "node --openssl-legacy-provider server.js",
     "test": "node --test",
+    "test:e2e": "node scripts/e2e-local.js",
     "build:dmg": "../scripts/build-dmg.sh",
     "build:win": "../scripts/build-windows.sh",
     "build:tether": "make -C tether",
@@ -25,5 +26,8 @@
     "geoip-lite": "^2.0.3",
     "torrent-search-api": "^2.1.4",
     "webtorrent": "^3.0.21"
+  },
+  "devDependencies": {
+    "bittorrent-tracker": "^11.2.3"
   }
 }
