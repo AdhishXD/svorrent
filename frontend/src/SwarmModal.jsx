@@ -200,17 +200,22 @@ export function SwarmModal({ torrent, onClose }) {
           {/* Controls Bar: Scalable Network Channels Segmented Control */}
           <div className="swarm-modal-toolbar">
             <div className="segmented-control" role="group" aria-label="Interface filter">
-              <button
-                className={`segment-btn ${selectedInterface === 'all' ? 'is-active' : ''}`}
-                onClick={() => setSelectedInterface('all')}
-                aria-pressed={selectedInterface === 'all'}
-              >
-                All interfaces ({peers.length})
-              </button>
+              {((summary.interfaces || []).length > 1 || (summary.interfaces || []).length === 0) && (
+                <button
+                  className={`segment-btn ${selectedInterface === 'all' ? 'is-active' : ''}`}
+                  onClick={() => setSelectedInterface('all')}
+                  aria-pressed={selectedInterface === 'all'}
+                >
+                  All interfaces ({peers.length})
+                </button>
+              )}
 
               {(summary.interfaces || []).map((iface) => {
                 const color = getIfaceColor(iface.type);
-                const isSelected = selectedInterface === iface.device;
+                const hasMultiple = (summary.interfaces || []).length > 1;
+                const isSelected = hasMultiple
+                  ? selectedInterface === iface.device
+                  : (selectedInterface === 'all' || selectedInterface === iface.device);
                 return (
                   <button
                     key={iface.device}
