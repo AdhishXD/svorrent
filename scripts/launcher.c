@@ -8,8 +8,10 @@
 #include <stdio.h>
 #include <stdbool.h>
 
+#ifdef _MSC_VER
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "shell32.lib")
+#endif
 
 static bool is_server_listening(void) {
     WSADATA wsa;
@@ -30,19 +32,23 @@ static bool is_server_listening(void) {
     addr.sin_port = htons(3001);
     addr.sin_addr.s_addr = inet_addr("127.0.0.1");
 
-    connect(sock, (struct sockaddr*)&addr, sizeof(addr));
+    int result = connect(sock, (struct sockaddr*)&addr, sizeof(addr));
+    bool connected = result == 0;
+    int error = connected ? 0 : WSAGetLastError();
+    if (!connected && (error == WSAEWOULDBLOCK || error == WSAEINPROGRESS || error == WSAEALREADY)) {
+        fd_set writeSet;
+        FD_ZERO(&writeSet);
+        FD_SET(sock, &writeSet);
 
-    fd_set writeSet;
-    FD_ZERO(&writeSet);
-    FD_SET(sock, &writeSet);
+        struct timeval tv;
+        tv.tv_sec = 0;
+        tv.tv_usec = 300000;
 
-    struct timeval tv;
-    tv.tv_sec = 0;
-    tv.tv_usec = 300000;
-
-    bool connected = false;
-    if (select(0, NULL, &writeSet, NULL, &tv) > 0) {
-        connected = true;
+        if (select(0, NULL, &writeSet, NULL, &tv) > 0) {
+            int socketError = 0;
+            int size = sizeof(socketError);
+            connected = getsockopt(sock, SOL_SOCKET, SO_ERROR, (char*)&socketError, &size) == 0 && socketError == 0;
+        }
     }
 
     closesocket(sock);
@@ -111,6 +117,10 @@ static bool find_node(const wchar_t* appDir, wchar_t* outNode, size_t maxLen) {
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    (void)hInstance;
+    (void)hPrevInstance;
+    (void)lpCmdLine;
+    (void)nCmdShow;
     if (is_server_listening()) {
         ShellExecuteW(NULL, L"open", L"http://localhost:3001", NULL, NULL, SW_SHOWNORMAL);
         return 0;
@@ -176,11 +186,18 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
 
+    bool ready = false;
     for (int i = 0; i < 20; i++) {
         Sleep(300);
         if (is_server_listening()) {
+            ready = true;
             break;
         }
+    }
+
+    if (!ready) {
+        MessageBoxW(NULL, L"Svorrent could not start its local server. Check that port 3001 is free and Node.js is installed, then try again.", L"Svorrent Startup Error", MB_ICONERROR | MB_OK);
+        return 1;
     }
 
     ShellExecuteW(NULL, L"open", L"http://localhost:3001", NULL, NULL, SW_SHOWNORMAL);

@@ -120,6 +120,10 @@ for i in {1..20}; do
 done
 
 # 5. Open in user's default browser
+if ! curl -s -m 1 http://localhost:3001/api/torrents >/dev/null 2>&1; then
+    osascript -e 'display alert "Svorrent could not start" message "The local server did not become ready. Check ~/Library/Logs/Svorrent/svorrent.log, then try again."'
+    exit 1
+fi
 open "http://localhost:3001"
 EOF
 chmod +x "$APP_BUNDLE/Contents/MacOS/Svorrent"
