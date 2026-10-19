@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
+import { useDialog } from './useDialog';
 import { SwarmWorldMap } from './SwarmWorldMap';
 import { countryFlag, countryName } from './countryUtils';
 import { Icon } from './Icon';
@@ -8,7 +9,7 @@ import { apiGet, formatSpeed, formatBytes } from './lib';
 const INTERFACE_COLORS = {
   wifi: '#38bdf8',       // Cyan
   cellular: '#10b981',   // Emerald
-  ethernet: '#a855f7',   // Purple
+  ethernet: '#c9a24a',
   bridge: '#f59e0b',     // Amber
   other: '#94a3b8',      // Slate
 };
@@ -28,33 +29,36 @@ export function SwarmModal({ torrent, onClose }) {
   const [selectedInterface, setSelectedInterface] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState('downSpeed');
+  const [error, setError] = useState('');
+  const dialog = useDialog(true, onClose);
 
   const torrentId = torrent?.infoHash;
 
   useEffect(() => {
-    const onKey = (e) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  useEffect(() => {
     if (!torrentId) return;
     let alive = true;
+    let timer;
+    const controller = new AbortController();
 
     const load = async () => {
       try {
-        const res = await apiGet(`/swarm?id=${torrentId}`);
+        const res = await apiGet(`/swarm?id=${encodeURIComponent(torrentId)}`, { signal: controller.signal });
         if (alive && res) {
           setData(res);
+          setError('');
         }
-      } catch {}
+      } catch (err) {
+        if (alive) setError(err.message || 'Could not update peers. Retrying…');
+      } finally {
+        if (alive) timer = setTimeout(load, 1500);
+      }
     };
 
     load();
-    const interval = setInterval(load, 1500);
     return () => {
       alive = false;
-      clearInterval(interval);
+      controller.abort();
+      clearTimeout(timer);
     };
   }, [torrentId]);
 
@@ -117,13 +121,13 @@ export function SwarmModal({ torrent, onClose }) {
     const ifaces = summary.interfaces || [];
     return ifaces.map((iface) => {
       const ifacePeers = peers.filter(
-        (p) => p.networkDevice === iface.device || p.networkType === iface.type
+        (p) => iface.device ? p.networkDevice === iface.device : p.networkType === iface.type
       );
       const tcpCount = ifacePeers.filter((p) => !p.protocol || p.protocol === 'TCP').length;
       const utpCount = ifacePeers.filter((p) => p.protocol === 'uTP').length;
       const unchokedCount = ifacePeers.filter((p) => !p.choked).length;
       const chokedCount = ifacePeers.filter((p) => p.choked).length;
-      const downSpeed = iface.downSpeed || ifacePeers.reduce((s, p) => s + (p.downloadSpeed || 0), 0);
+      const downSpeed = iface.downSpeed ?? ifacePeers.reduce((s, p) => s + (p.downloadSpeed || 0), 0);
       const upSpeed = ifacePeers.reduce((s, p) => s + (p.uploadSpeed || 0), 0);
 
       return {
@@ -141,16 +145,13 @@ export function SwarmModal({ torrent, onClose }) {
 
   return (
     <div className="modal-backdrop swarm-modal-backdrop" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal swarm-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="swarm-modal-title">
+      <div ref={dialog} tabIndex={-1} className="modal swarm-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="swarm-modal-title">
         {/* Modal Header */}
         <div className="swarm-modal-head">
           <div className="swarm-modal-title-wrap">
-            <div className="swarm-modal-icon-badge">
-              <Icon name="activity" size={16} />
-            </div>
             <div>
               <h2 id="swarm-modal-title" className="swarm-modal-title ellipsis" title={torrent?.name || torrent?.fileName}>
-                Swarm Telemetry Matrix · {torrent?.name || torrent?.fileName || torrentId}
+                Peers · {torrent?.name || torrent?.fileName || torrentId}
               </h2>
               <div className="swarm-modal-sub mono text-xs muted">
                 <span>{formatBytes(torrent?.length || 0)}</span>
@@ -166,22 +167,24 @@ export function SwarmModal({ torrent, onClose }) {
 
           <div className="swarm-head-actions">
             {/* Primary Engineering View Switcher */}
-            <div className="swarm-view-switcher" role="radiogroup" aria-label="View mode">
+            <div className="swarm-view-switcher" role="group" aria-label="View mode">
               <button
                 className={`view-toggle-btn ${viewMode === 'matrix' ? 'is-active' : ''}`}
                 onClick={() => setViewMode('matrix')}
+                aria-pressed={viewMode === 'matrix'}
                 title="Piece Bitfield & Interface Telemetry Matrix"
               >
                 <Icon name="grid" size={13} />
-                <span>Telemetry Matrix</span>
+                <span>Pieces</span>
               </button>
               <button
                 className={`view-toggle-btn ${viewMode === 'map' ? 'is-active' : ''}`}
                 onClick={() => setViewMode('map')}
+                aria-pressed={viewMode === 'map'}
                 title="Global Peer Geolocation Map"
               >
                 <Icon name="globe" size={13} />
-                <span>World Map</span>
+                <span>Map</span>
               </button>
             </div>
 
@@ -193,14 +196,16 @@ export function SwarmModal({ torrent, onClose }) {
 
         {/* Modal Scrollable Body */}
         <div className="swarm-modal-body">
+          {error && <p className="notice notice-error" role="status">{error} Peer data may be out of date.</p>}
           {/* Controls Bar: Scalable Network Channels Segmented Control */}
           <div className="swarm-modal-toolbar">
-            <div className="segmented-control" role="radiogroup" aria-label="Channel filter">
+            <div className="segmented-control" role="group" aria-label="Interface filter">
               <button
                 className={`segment-btn ${selectedInterface === 'all' ? 'is-active' : ''}`}
                 onClick={() => setSelectedInterface('all')}
+                aria-pressed={selectedInterface === 'all'}
               >
-                All Channels ({peers.length})
+                All interfaces ({peers.length})
               </button>
 
               {(summary.interfaces || []).map((iface) => {
@@ -211,6 +216,7 @@ export function SwarmModal({ torrent, onClose }) {
                     key={iface.device}
                     className={`segment-btn ${isSelected ? 'is-active' : ''}`}
                     onClick={() => setSelectedInterface(iface.device)}
+                    aria-pressed={isSelected}
                   >
                     <span className="chan-dot" style={{ backgroundColor: color }} />
                     <span className="chan-label">{iface.name}</span>
@@ -241,7 +247,7 @@ export function SwarmModal({ torrent, onClose }) {
                 <div className="card-top-bar">
                   <div className="card-heading">
                     <Icon name="layers" size={15} />
-                    <span className="card-title">Piece Bitfield & Sequential Streaming Frontier</span>
+                    <span className="card-title">Download progress</span>
                   </div>
                   {pieceTelemetry && (
                     <div className="frontier-metrics mono text-xs muted">
@@ -284,7 +290,7 @@ export function SwarmModal({ torrent, onClose }) {
                 {pieceTelemetry?.availability && pieceTelemetry.availability.length > 0 && (
                   <div className="swarm-rarity-row">
                     <div className="rarity-label-bar">
-                      <span className="text-xs muted">Swarm Piece Availability Heatmap (Rare vs Abundant):</span>
+                      <span className="text-xs muted">Piece availability across peers</span>
                       <div className="rarity-legend text-xs mono muted">
                         <span className="rarity-legend-box is-rare" /> &lt;25% swarm
                         <span className="rarity-legend-box is-medium" /> 50%
@@ -324,7 +330,7 @@ export function SwarmModal({ torrent, onClose }) {
                 <div className="card-top-bar">
                   <div className="card-heading">
                     <Icon name="network" size={15} />
-                    <span className="card-title">Per-Interface Peer Breakdown & Protocol Matrix</span>
+                    <span className="card-title">Peers by interface</span>
                   </div>
                   <span className="text-xs muted">Dynamic socket distribution</span>
                 </div>
@@ -381,7 +387,7 @@ export function SwarmModal({ torrent, onClose }) {
               <div className="swarm-map-card">
                 <div className="card-top-bar">
                   <div className="card-heading">
-                    <span className="card-title">Global Peer Topology</span>
+                    <span className="card-title">Peer locations</span>
                     {selectedCountry && (
                       <span className="selected-filter-badge">
                         Filtered: {countryFlag(selectedCountry)} {countryName(selectedCountry)}
@@ -405,7 +411,7 @@ export function SwarmModal({ torrent, onClose }) {
               {/* Countries Ranked List */}
               <div className="swarm-countries-card">
                 <div className="card-top-bar">
-                  <span className="card-title">Contributing Countries</span>
+                  <span className="card-title">Countries</span>
                   <span className="mono muted text-xs">{summary.countries?.length || 0} total</span>
                 </div>
 
@@ -417,12 +423,12 @@ export function SwarmModal({ torrent, onClose }) {
                       const isSelected = selectedCountry === c.code.toLowerCase();
                       const pct = peers.length > 0 ? Math.round((c.count / peers.length) * 100) : 0;
                       return (
-                        <div
+                        <button
+                          type="button"
                           key={c.code}
                           className={`country-row ${isSelected ? 'is-selected' : ''}`}
                           onClick={() => setSelectedCountry(isSelected ? null : c.code.toLowerCase())}
-                          role="button"
-                          tabIndex={0}
+                          aria-pressed={isSelected}
                         >
                           <div className="country-row-main">
                             <span className="country-flag">{countryFlag(c.code)}</span>
@@ -436,7 +442,7 @@ export function SwarmModal({ torrent, onClose }) {
                             </div>
                             <span className="country-speed mono muted">{formatSpeed(c.downSpeed)}</span>
                           </div>
-                        </div>
+                        </button>
                       );
                     })
                   )}
@@ -449,7 +455,7 @@ export function SwarmModal({ torrent, onClose }) {
           <div className="swarm-peers-section">
             <div className="section-head">
               <div className="section-title-wrap">
-                <h3 className="section-title">Connected Peer Wires</h3>
+                <h3 className="section-title">Connected peers</h3>
                 <span className="section-count mono muted">({sortedPeers.length} matching)</span>
               </div>
 
@@ -459,12 +465,13 @@ export function SwarmModal({ torrent, onClose }) {
                   <input
                     type="text"
                     placeholder="Filter by IP, client, protocol, or country…"
+                    aria-label="Filter peers"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="input-search-compact"
                   />
                   {searchQuery && (
-                    <button className="input-clear-btn" onClick={() => setSearchQuery('')}>
+                    <button className="input-clear-btn" aria-label="Clear peer filter" onClick={() => setSearchQuery('')}>
                       <Icon name="x" size={12} />
                     </button>
                   )}
@@ -473,6 +480,7 @@ export function SwarmModal({ torrent, onClose }) {
                 <div className="sort-select-wrap">
                   <span className="sort-label text-xs muted">Sort:</span>
                   <select
+                    aria-label="Sort peers"
                     value={sortBy}
                     onChange={(e) => setSortBy(e.target.value)}
                     className="sort-dropdown"
@@ -495,7 +503,7 @@ export function SwarmModal({ torrent, onClose }) {
                     <th>IP Address : Port</th>
                     <th>Client Software</th>
                     <th>Protocol</th>
-                    <th>Channel Interface</th>
+                    <th>Interface</th>
                     <th className="col-num">Down Speed</th>
                     <th className="col-num">Up Speed</th>
                     <th className="col-num">Swarm Progress</th>
@@ -538,7 +546,7 @@ export function SwarmModal({ torrent, onClose }) {
 
                           <td>
                             <span className={`channel-badge ${isTether ? 'badge-tether' : 'badge-wifi'}`}>
-                              {p.networkInterface || p.networkDevice || 'en0'}
+                              {p.networkInterface || p.networkDevice || 'Unknown'}
                             </span>
                           </td>
 

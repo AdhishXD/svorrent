@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Icon } from './Icon';
 import { apiGet, formatBytes, formatSpeed } from './lib';
 import { countryFlag, countryName } from './countryUtils';
+import { useDialog } from './useDialog';
 
 class Boundary extends React.Component {
   state = { error: null };
@@ -21,15 +22,11 @@ class Boundary extends React.Component {
 }
 
 function Drawer({ title, subtitle, onClose, children, footer }) {
-  useEffect(() => {
-    const onKey = (e) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  const dialog = useDialog(true, onClose);
 
   return (
     <div className="drawer-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <aside className="drawer" role="dialog" aria-modal="true" aria-label={title}>
+      <aside ref={dialog} tabIndex={-1} className="drawer" role="dialog" aria-modal="true" aria-label={title}>
         <header className="drawer-head">
           <div className="drawer-heading">
             <h2 className="drawer-title" title={title}>
@@ -51,29 +48,36 @@ function Drawer({ title, subtitle, onClose, children, footer }) {
 function DetailsInner({ torrentId, onClose, onReveal }) {
   const [stats, setStats] = useState(null);
   const [tab, setTab] = useState('files');
+  const [error, setError] = useState('');
 
   useEffect(() => {
     let alive = true;
+    let timer;
+    const controller = new AbortController();
+    setStats(null);
+    setError('');
     const load = async () => {
       try {
-        const data = await apiGet(`/torrent/${torrentId}/nerd-stats`);
-        if (alive) setStats(data);
-      } catch {
-        /* keep last good snapshot */
+        const data = await apiGet(`/torrent/${encodeURIComponent(torrentId)}/nerd-stats`, { signal: controller.signal });
+        if (alive) { setStats(data); setError(''); }
+      } catch (err) {
+        if (alive) setError(err.message || 'Could not load torrent details. Retrying…');
+      } finally {
+        if (alive) timer = setTimeout(load, 1500);
       }
     };
     load();
-    const id = setInterval(load, 1000);
     return () => {
       alive = false;
-      clearInterval(id);
+      controller.abort();
+      clearTimeout(timer);
     };
   }, [torrentId]);
 
   if (!stats) {
     return (
-      <Drawer title="Loading…" onClose={onClose}>
-        <p className="empty">Fetching torrent details…</p>
+      <Drawer title="Torrent details" onClose={onClose}>
+        <p className="empty" role="status">{error || 'Fetching torrent details…'}</p>
       </Drawer>
     );
   }
@@ -101,6 +105,7 @@ function DetailsInner({ torrentId, onClose, onReveal }) {
         </button>
       }
     >
+      {error && <p className="notice notice-error" role="status">{error} Showing the last update.</p>}
       <dl className="stat-grid">
         <div>
           <dt>Progress</dt>
@@ -259,7 +264,7 @@ function DetailsInner({ torrentId, onClose, onReveal }) {
 
 export function TorrentDetails(props) {
   return (
-    <Boundary onClose={props.onClose}>
+    <Boundary key={props.torrentId} onClose={props.onClose}>
       <DetailsInner {...props} />
     </Boundary>
   );

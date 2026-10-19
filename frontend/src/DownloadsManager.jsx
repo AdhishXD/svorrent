@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useDialog } from './useDialog';
 import { TorrentDetails } from './TorrentDetails';
 import { SwarmModal } from './SwarmModal';
 import { Icon } from './Icon';
@@ -13,8 +14,8 @@ const FILTERS = [
 
 function statusOf(t) {
   if (t.isFolderFile) {
-    if (t.isRecoverable) return { key: 'halfway', label: 'Halfway · In Folder' };
-    return { key: 'local', label: 'In Folder' };
+    if (t.isRecoverable) return { key: 'halfway', label: 'Incomplete · On disk' };
+    return { key: 'local', label: 'On disk' };
   }
   if (t.done) return { key: 'done', label: 'Completed' };
   if (t.paused) return { key: 'paused', label: 'Paused' };
@@ -33,22 +34,38 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteFromDisk, setDeleteFromDisk] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const resumeDialog = useDialog(resumeModalOpen, () => setResumeModalOpen(false), resuming);
+  const deleteDialog = useDialog(!!deleteTarget, () => setDeleteTarget(null), deleting);
+  const openedFromHash = useRef(false);
+  const pendingActions = useRef(new Set());
+  const [pending, setPending] = useState(new Set());
+
+  const runAction = async (id, action) => {
+    if (pendingActions.current.has(id)) return;
+    pendingActions.current.add(id);
+    setPending(new Set(pendingActions.current));
+    try { await action(); } finally {
+      pendingActions.current.delete(id);
+      setPending(new Set(pendingActions.current));
+    }
+  };
 
   useEffect(() => {
-    if (window.location.hash.includes('swarm=open') && torrents.length > 0) {
+    if (!openedFromHash.current && window.location.hash.includes('swarm=open') && torrents.length > 0) {
+      openedFromHash.current = true;
       setSwarmTorrent(torrents[0]);
     }
   }, [torrents]);
 
   const counts = {
     all: torrents.length,
-    active: torrents.filter((t) => !t.done && !t.paused).length,
+    active: torrents.filter((t) => !t.isFolderFile && !t.done && !t.paused).length,
     paused: torrents.filter((t) => t.paused).length,
     completed: torrents.filter((t) => t.done).length,
   };
 
   const visible = torrents.filter((t) => {
-    if (filter === 'active') return !t.done && !t.paused;
+    if (filter === 'active') return !t.isFolderFile && !t.done && !t.paused;
     if (filter === 'paused') return t.paused;
     if (filter === 'completed') return t.done;
     return true;
@@ -181,7 +198,7 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
             }}
             title="Resume a halfway download by pasting its magnet link or infohash"
           >
-            <Icon name="magnet" size={14} /> Resume with Magnet
+            <Icon name="magnet" size={14} /> Resume with magnet
           </button>
           <button
             id="open-downloads-folder"
@@ -196,13 +213,12 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
 
       {/* Toolbar & Filter Tabs */}
       <div className="toolbar">
-        <div className="segmented" role="tablist" aria-label="Filter downloads">
+        <div className="segmented" role="group" aria-label="Filter downloads">
           {FILTERS.map((f) => (
             <button
               key={f.key}
               id={`filter-${f.key}`}
-              role="tab"
-              aria-selected={filter === f.key}
+              aria-pressed={filter === f.key}
               className={`segment ${filter === f.key ? 'is-active' : ''}`}
               onClick={() => setFilter(f.key)}
             >
@@ -245,7 +261,7 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
             </thead>
             <tbody>
               {visible.map((t) => {
-                const pct = Math.floor((t.progress || 0) * 1000) / 10;
+                const pct = Math.floor(Math.max(0, Math.min(1, t.progress || 0)) * 1000) / 10;
                 const status = statusOf(t);
                 const isFolder = !!t.isFolderFile;
 
@@ -258,9 +274,9 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
                             {t.name}
                           </span>
                           {t.isRecoverable ? (
-                            <span className="tag tag-recoverable-inline">HALFWAY</span>
+                            <span className="tag tag-recoverable-inline">Incomplete</span>
                           ) : (
-                            <span className="tag tag-folder-inline">IN FOLDER</span>
+                            <span className="tag tag-folder-inline">On disk</span>
                           )}
                         </div>
                       ) : (
@@ -287,7 +303,7 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
                           {t.length > 0 && (
                             <>
                               <span className="dot-sep" />
-                              <span className="mono">{formatBytes(t.downloaded || t.length)}</span>
+                              <span className="mono">{formatBytes(t.downloaded ?? (isFolder ? t.length : 0))}</span>
                               {t.isRecoverable && t.length > t.downloaded && (
                                 <span className="muted mono"> of {formatBytes(t.length)}</span>
                               )}
@@ -318,7 +334,8 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
                             {t.isRecoverable && (
                               <button
                                 className="icon-btn icon-btn-resume"
-                                onClick={() => resumeRecoverable(t)}
+                                onClick={() => runAction(t.infoHash, () => resumeRecoverable(t))}
+                                disabled={pending.has(t.infoHash)}
                                 title="Resume download halfway"
                                 aria-label="Resume download halfway"
                               >
@@ -369,7 +386,8 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
                             {!t.done && (
                               <button
                                 className="icon-btn"
-                                onClick={() => togglePause(t)}
+                                onClick={() => runAction(t.infoHash, () => togglePause(t))}
+                                disabled={pending.has(t.infoHash)}
                                 title={t.paused ? 'Resume download' : 'Pause download'}
                                 aria-label={t.paused ? 'Resume download' : 'Pause download'}
                               >
@@ -378,7 +396,8 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
                             )}
                             <button
                               className="icon-btn"
-                              onClick={() => recheckTorrent(t.infoHash, t.name)}
+                              onClick={() => runAction(t.infoHash, () => recheckTorrent(t.infoHash, t.name))}
+                              disabled={pending.has(t.infoHash)}
                               title="Force Recheck / Verify local data on disk"
                               aria-label="Force Recheck"
                             >
@@ -406,8 +425,8 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
                             <button
                               className="icon-btn"
                               onClick={() => setSwarmTorrent(t)}
-                              title="Swarm Topology & Peer Map"
-                              aria-label="Swarm Map"
+                              title="Peers and pieces"
+                              aria-label="Peers and pieces"
                             >
                               <Icon name="globe" />
                             </button>
@@ -442,20 +461,21 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
       {/* Modal: Resume Download with Magnet or InfoHash */}
       {resumeModalOpen && (
         <div className="modal-backdrop" onClick={() => !resuming && setResumeModalOpen(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="modal-resume-title">
+          <div ref={resumeDialog} tabIndex={-1} className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="modal-resume-title">
             <div className="modal-head">
-              <h2 id="modal-resume-title" className="modal-title">Continue Download from Magnet</h2>
-              <button className="icon-btn" onClick={() => setResumeModalOpen(false)} aria-label="Close dialog">
+              <h2 id="modal-resume-title" className="modal-title">Resume a download</h2>
+              <button className="icon-btn" disabled={resuming} onClick={() => setResumeModalOpen(false)} aria-label="Close dialog">
                 <Icon name="x" size={14} />
               </button>
             </div>
             <form onSubmit={handleResumeMagnetSubmit} className="modal-body">
               <p className="modal-desc muted">
-                Paste a magnet link or 40-character infohash. Svorrent will match any existing files or partial chunks in <span className="mono">~/Downloads/Svorrent</span> and automatically continue downloading the remaining pieces without re-downloading existing data.
+                Paste a magnet link or info hash. Existing files in <span className="mono">~/Downloads/Svorrent</span> will be checked before missing pieces are downloaded.
               </p>
               <div className="field">
                 <input
                   type="text"
+                  aria-label="Magnet link or info hash"
                   className="input mono"
                   placeholder="magnet:?xt=urn:btih:..."
                   value={magnetInput}
@@ -465,11 +485,11 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
                 />
               </div>
               <div className="modal-actions">
-                <button type="button" className="btn btn-outline" onClick={() => setResumeModalOpen(false)}>
+                <button type="button" className="btn btn-outline" disabled={resuming} onClick={() => setResumeModalOpen(false)}>
                   Cancel
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={resuming || !magnetInput.trim()}>
-                  {resuming ? 'Verifying files…' : 'Continue Download'}
+                  {resuming ? 'Verifying files…' : 'Resume download'}
                 </button>
               </div>
             </form>
@@ -484,6 +504,8 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
           onClick={() => !deleting && setDeleteTarget(null)}
         >
           <div
+            ref={deleteDialog}
+            tabIndex={-1}
             className="modal"
             onClick={(e) => e.stopPropagation()}
             role="dialog"
@@ -492,11 +514,8 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
           >
             <div className="modal-head">
               <div className="delete-modal-head-title">
-                <div className="delete-modal-icon-badge">
-                  <Icon name="trash" size={16} />
-                </div>
                 <h2 id="modal-delete-title" className="modal-title">
-                  {deleteTarget.isFolderFile ? 'Delete File from Disk' : 'Remove Download'}
+                  {deleteTarget.isFolderFile ? 'Delete file?' : 'Remove download?'}
                 </h2>
               </div>
               <button
@@ -531,7 +550,7 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
                 <div className="delete-impact-notice is-danger">
                   <Icon name="alert" size={15} />
                   <span>
-                    This unmanaged item is stored in <span className="mono">~/Downloads/Svorrent</span>. Deleting it will permanently remove it from your storage drive.
+                    This permanently deletes the item from <span className="mono">~/Downloads/Svorrent</span>. It cannot be undone.
                   </span>
                 </div>
               ) : (
@@ -556,7 +575,7 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
                     <Icon name={deleteFromDisk ? 'alert' : 'info'} size={15} />
                     <span>
                       {deleteFromDisk ? (
-                        <><strong>Destructive:</strong> All local files and incomplete chunks will be permanently wiped from your drive.</>
+                        <>The downloaded files and partial data will be permanently deleted. This cannot be undone.</>
                       ) : (
                         <>Files already on disk are retained. You can resume later via <em>Resume with Magnet</em>.</>
                       )}
@@ -585,10 +604,10 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
                   ) : deleteFromDisk || deleteTarget.isFolderFile ? (
                     <>
                       <Icon name="trash" size={14} />
-                      <span>Delete from Disk</span>
+                      <span>Delete files</span>
                     </>
                   ) : (
-                    'Remove from List'
+                    'Remove download'
                   )}
                 </button>
               </div>
@@ -609,7 +628,7 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
       {/* Swarm Topology & Peer Map Modal */}
       {swarmTorrent && (
         <SwarmModal
-          torrent={swarmTorrent}
+          torrent={torrents.find((t) => t.infoHash === swarmTorrent.infoHash) || swarmTorrent}
           onClose={() => setSwarmTorrent(null)}
         />
       )}
