@@ -132,7 +132,8 @@ function App() {
             className="wordmark"
             onClick={(e) => followRoute(e, 'search')}
           >
-            svorrent
+            <img src="/favicon.svg" alt="" className="brand-logo" width="20" height="20" />
+            <span>svorrent</span>
           </a>
 
           <nav className="tabs" aria-label="Primary">
