@@ -444,7 +444,7 @@ a {
 .table-wrap {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  overflow: hidden;
+  overflow-x: auto;
   transition: opacity 0.15s;
 }
 
@@ -1340,16 +1340,52 @@ a {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  min-width: 960px;
 }
 
-.adapters-table tr.row-disabled td {
-  opacity: 0.5;
+.adapters-table th,
+.adapters-table td {
+  overflow: hidden;
 }
 
 .adapters-table .col-status {
-  width: 32px;
+  width: 56px;
   text-align: center;
-  padding-left: 14px;
+  padding: 0 8px;
+}
+
+.adapters-table .col-iface {
+  width: 170px;
+}
+
+.adapters-table .col-type {
+  width: 90px;
+}
+
+.adapters-table .col-ip {
+  width: 140px;
+}
+
+.adapters-table .col-download {
+  width: 175px;
+}
+
+.adapters-table .col-upload {
+  width: 90px;
+}
+
+.adapters-table .col-data {
+  width: 100px;
+}
+
+.adapters-table .col-peers {
+  width: 70px;
+}
+
+.adapters-table .col-actions {
+  width: 85px;
+  text-align: right;
+  padding-right: 16px;
 }
 
 .status-dot {
@@ -1396,6 +1432,11 @@ a {
   align-items: center;
   justify-content: flex-end;
   gap: 10px;
+  white-space: nowrap;
+}
+
+.speed-with-sparkline .mono {
+  white-space: nowrap;
 }
 
 .mini-sparkline {
@@ -2726,7 +2767,7 @@ a {
   .topbar-status { width: 100%; padding-bottom: 10px; }
   .downloads-table { min-width: 680px; }
   .results-table { min-width: 520px; }
-  .adapters-table { min-width: 760px; }
+  .adapters-table { min-width: 960px; }
   .swarm-modal-head { align-items: flex-start; flex-direction: column; gap: 12px; }
   .swarm-head-actions { width: 100%; justify-content: space-between; }
   .modal-backdrop { padding: 10px; }

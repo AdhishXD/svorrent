@@ -353,13 +353,13 @@ export function NetworksPage({ notify, isActive = true }) {
               <thead>
                 <tr>
                   <th className="col-status">Status</th>
-                  <th>Interface</th>
-                  <th>Type</th>
-                  <th>IPv4 address</th>
-                  <th className="col-num">Download</th>
-                  <th className="col-num">Upload</th>
-                  <th className="col-num">Data</th>
-                  <th className="col-num">Peers</th>
+                  <th className="col-iface">Interface</th>
+                  <th className="col-type">Type</th>
+                  <th className="col-ip">IPv4 address</th>
+                  <th className="col-num col-download">Download</th>
+                  <th className="col-num col-upload">Upload</th>
+                  <th className="col-num col-data">Data</th>
+                  <th className="col-num col-peers">Peers</th>
                   <th className="col-actions">Routing</th>
                 </tr>
               </thead>
@@ -376,27 +376,27 @@ export function NetworksPage({ notify, isActive = true }) {
                           title={!iface.connected ? 'Disconnected' : iface.enabled ? 'Routing enabled' : 'Routing disabled'}
                         />
                       </td>
-                      <td>
+                      <td className="col-iface">
                         <div className="iface-cell">
                           <span className="iface-name">{iface.name}</span>
                         </div>
                         <span className="mono muted iface-device">{iface.device}</span>
                       </td>
-                      <td>
+                      <td className="col-type">
                         <span className={`tag tag-iface tag-${iface.type}`}>
                           {iface.type.toUpperCase()}
                         </span>
                       </td>
-                      <td className="mono">{iface.ip}</td>
-                      <td className="col-num">
+                      <td className="col-ip mono">{iface.ip}</td>
+                      <td className="col-num col-download">
                         <div className="speed-with-sparkline">
                           <span className="mono">{formatSpeed(iface.downSpeed)}</span>
                           <MiniSparkline data={iface.history} color={color} width={64} height={18} />
                         </div>
                       </td>
-                      <td className="col-num mono muted">{formatSpeed(iface.upSpeed)}</td>
-                      <td className="col-num mono">{formatBytes(iface.downloaded)}</td>
-                      <td className="col-num mono">{iface.peers ?? 0}</td>
+                      <td className="col-num col-upload mono muted">{formatSpeed(iface.upSpeed)}</td>
+                      <td className="col-num col-data mono">{formatBytes(iface.downloaded)}</td>
+                      <td className="col-num col-peers mono">{iface.peers ?? 0}</td>
                       <td className="col-actions">
                         <button
                           className={`btn-toggle ${iface.enabled ? 'is-active' : ''}`}
