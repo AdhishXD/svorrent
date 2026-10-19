@@ -924,12 +924,35 @@ app.post('/api/torrent/:id/delete', async (req, res) => {
   const torrent = await client.get(req.params.id);
   if (!torrent) return res.status(404).json({ error: 'Torrent not found' });
   const { deleteFiles } = req.body;
+
+  const torrentName = torrent.name;
+  const basePath = torrent.path ? torrent.path : DOWNLOAD_DIR;
+  const targetPath = torrentName ? path.join(basePath, torrentName) : null;
+  const filePaths = (torrent.files || []).map((f) => path.join(basePath, f.path));
+
   if (deleteFiles) {
     archive.remove(req.params.id);
   }
+
   torrent.destroy({ destroyStore: !!deleteFiles }, () => {
+    if (deleteFiles) {
+      try {
+        if (targetPath && fs.existsSync(targetPath)) {
+          fs.rmSync(targetPath, { recursive: true, force: true });
+        } else {
+          for (const fp of filePaths) {
+            if (fs.existsSync(fp)) {
+              fs.rmSync(fp, { recursive: true, force: true });
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[delete] Failed to remove files from disk:', err.message);
+      }
+      folderScanner.invalidateCache();
+    }
     saveSession();
-    res.json({ success: true, deleted: true });
+    res.json({ success: true, deleted: true, filesDeleted: !!deleteFiles });
   });
 });
 

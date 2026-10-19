@@ -232,6 +232,17 @@ a {
   background: var(--hover);
 }
 
+.btn-danger {
+  background: var(--danger);
+  color: #ffffff;
+  border-color: var(--danger);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #e2716a;
+  border-color: #e2716a;
+}
+
 .icon-spin {
   animation: spin 0.45s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -1536,6 +1547,120 @@ a {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 4px;
+}
+
+/* Delete Confirmation Modal Styles */
+.delete-modal-head-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.delete-modal-icon-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: rgba(217, 98, 90, 0.14);
+  color: var(--danger);
+  border: 1px solid rgba(217, 98, 90, 0.28);
+  flex-shrink: 0;
+}
+
+.delete-target-preview {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 11px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.delete-target-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.delete-target-meta {
+  color: var(--text-2);
+}
+
+.delete-options-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.delete-disk-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.delete-disk-option:hover {
+  border-color: var(--text-2);
+  background: var(--hover);
+}
+
+.delete-disk-checkbox {
+  margin-top: 2px;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--danger);
+  flex-shrink: 0;
+}
+
+.delete-disk-label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.delete-disk-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.delete-disk-sub {
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.delete-impact-notice {
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 9px 13px;
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.15s ease;
+}
+
+.delete-impact-notice.is-safe {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+}
+
+.delete-impact-notice.is-danger {
+  background: rgba(217, 98, 90, 0.12);
+  border: 1px solid rgba(217, 98, 90, 0.32);
+  color: #ffa39e;
 }
 
 /* ---------------------------------------------------------------------------

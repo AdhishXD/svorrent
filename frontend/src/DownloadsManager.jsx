@@ -30,6 +30,9 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
   const [resumeModalOpen, setResumeModalOpen] = useState(false);
   const [magnetInput, setMagnetInput] = useState('');
   const [resuming, setResuming] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteFromDisk, setDeleteFromDisk] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (window.location.hash.includes('swarm=open') && torrents.length > 0) {
@@ -64,29 +67,37 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
     refresh();
   };
 
-  const remove = async (t) => {
-    if (t.isFolderFile) {
-      if (!window.confirm(`Delete “${t.name}” from disk permanently?\n\nThis will remove the file from ~/Downloads/Svorrent.`)) return;
-      try {
+  const promptRemove = (t) => {
+    setDeleteTarget(t);
+    setDeleteFromDisk(false);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    const t = deleteTarget;
+    setDeleting(true);
+
+    try {
+      if (t.isFolderFile) {
         await apiPost('/folder-files/delete', { name: t.folderItemName || t.name });
         setTorrents((prev) => prev.filter((x) => x.infoHash !== t.infoHash));
         notify(`Deleted “${t.name}” from disk`);
-        refresh();
-      } catch (err) {
-        notify(err.message || 'Failed to delete file', 'error');
+      } else {
+        await apiPost(`/torrent/${t.infoHash}/delete`, { deleteFiles: deleteFromDisk });
+        setTorrents((prev) => prev.filter((x) => x.infoHash !== t.infoHash));
+        if (detailsId === t.infoHash) setDetailsId(null);
+        notify(
+          deleteFromDisk
+            ? `Deleted “${t.name}” and permanently erased files from disk`
+            : `Removed “${t.name}” (local files retained)`
+        );
       }
-      return;
-    }
-
-    if (!window.confirm(`Remove “${t.name}” from the list?\n\nFiles already on disk are kept.`)) return;
-    try {
-      await apiPost(`/torrent/${t.infoHash}/delete`, { deleteFiles: false });
-      setTorrents((prev) => prev.filter((x) => x.infoHash !== t.infoHash));
-      if (detailsId === t.infoHash) setDetailsId(null);
-      notify(`Removed “${t.name}” (local files retained)`);
+      setDeleteTarget(null);
       refresh();
     } catch (err) {
-      notify(err.message, 'error');
+      notify(err.message || 'Failed to remove', 'error');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -346,7 +357,7 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
                             </button>
                             <button
                               className="icon-btn icon-btn-danger"
-                              onClick={() => remove(t)}
+                              onClick={() => promptRemove(t)}
                               title="Delete from disk"
                               aria-label="Delete from disk"
                             >
@@ -410,7 +421,7 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
                             </button>
                             <button
                               className="icon-btn icon-btn-danger"
-                              onClick={() => remove(t)}
+                              onClick={() => promptRemove(t)}
                               title="Remove"
                               aria-label="Remove"
                             >
@@ -462,6 +473,126 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Delete / Remove Download Confirmation */}
+      {deleteTarget && (
+        <div
+          className="modal-backdrop"
+          onClick={() => !deleting && setDeleteTarget(null)}
+        >
+          <div
+            className="modal"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="modal-delete-title"
+          >
+            <div className="modal-head">
+              <div className="delete-modal-head-title">
+                <div className="delete-modal-icon-badge">
+                  <Icon name="trash" size={16} />
+                </div>
+                <h2 id="modal-delete-title" className="modal-title">
+                  {deleteTarget.isFolderFile ? 'Delete File from Disk' : 'Remove Download'}
+                </h2>
+              </div>
+              <button
+                className="icon-btn"
+                onClick={() => !deleting && setDeleteTarget(null)}
+                aria-label="Close dialog"
+                disabled={deleting}
+              >
+                <Icon name="x" size={14} />
+              </button>
+            </div>
+
+            <div className="modal-body">
+              <div className="delete-target-preview">
+                <div className="delete-target-name ellipsis" title={deleteTarget.name}>
+                  {deleteTarget.name}
+                </div>
+                <div className="delete-target-meta text-xs mono">
+                  {deleteTarget.isFolderFile ? (
+                    <span>Size on disk: {formatBytes(deleteTarget.length || deleteTarget.downloaded || 0)}</span>
+                  ) : (
+                    <span>
+                      Downloaded: {formatBytes(deleteTarget.downloaded || 0)}
+                      {deleteTarget.length > 0 && ` / ${formatBytes(deleteTarget.length)}`}
+                      {deleteTarget.progress > 0 && ` (${Math.round(deleteTarget.progress * 100)}%)`}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {deleteTarget.isFolderFile ? (
+                <div className="delete-impact-notice is-danger">
+                  <Icon name="alert" size={15} />
+                  <span>
+                    This unmanaged item is stored in <span className="mono">~/Downloads/Svorrent</span>. Deleting it will permanently remove it from your storage drive.
+                  </span>
+                </div>
+              ) : (
+                <div className="delete-options-group">
+                  <label className="delete-disk-option">
+                    <input
+                      type="checkbox"
+                      className="delete-disk-checkbox"
+                      checked={deleteFromDisk}
+                      onChange={(e) => setDeleteFromDisk(e.target.checked)}
+                      disabled={deleting}
+                    />
+                    <div className="delete-disk-label">
+                      <span className="delete-disk-title">Also delete downloaded files from disk</span>
+                      <span className="delete-disk-sub">
+                        Permanently erases all downloaded files for this torrent from <span className="mono">~/Downloads/Svorrent</span>.
+                      </span>
+                    </div>
+                  </label>
+
+                  <div className={`delete-impact-notice ${deleteFromDisk ? 'is-danger' : 'is-safe'}`}>
+                    <Icon name={deleteFromDisk ? 'alert' : 'info'} size={15} />
+                    <span>
+                      {deleteFromDisk ? (
+                        <><strong>Destructive:</strong> All local files and incomplete chunks will be permanently wiped from your drive.</>
+                      ) : (
+                        <>Files already on disk are retained. You can resume later via <em>Resume with Magnet</em>.</>
+                      )}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  onClick={() => setDeleteTarget(null)}
+                  disabled={deleting}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className={`btn ${deleteFromDisk || deleteTarget.isFolderFile ? 'btn-danger' : 'btn-primary'}`}
+                  onClick={confirmDelete}
+                  disabled={deleting}
+                >
+                  {deleting ? (
+                    'Removing…'
+                  ) : deleteFromDisk || deleteTarget.isFolderFile ? (
+                    <>
+                      <Icon name="trash" size={14} />
+                      <span>Delete from Disk</span>
+                    </>
+                  ) : (
+                    'Remove from List'
+                  )}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

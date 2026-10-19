@@ -8,6 +8,7 @@ const paths = {
   play: <path d="M4.5 2.75v10.5L13 8z" />,
   folder: <path d="M1.5 4a1 1 0 0 1 1-1h3.6l1.4 1.5h6a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" />,
   info: <><circle cx="8" cy="8" r="6.5" /><path d="M8 7.25V11.5M8 4.75v.5" /></>,
+  alert: <><path d="M8 1.5 1 14h14z" /><path d="M8 6v4M8 12.5v.5" /></>,
   trash: <><path d="M2.5 4h11" /><path d="M6 4V2.5h4V4" /><path d="M3.75 4l.7 9.5h7.1l.7-9.5" /></>,
   x: <path d="M4 4l8 8M12 4l-8 8" />,
   search: <><circle cx="7" cy="7" r="4.5" /><path d="M10.5 10.5 14 14" /></>,
