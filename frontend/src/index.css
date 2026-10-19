@@ -653,7 +653,9 @@ a {
 }
 
 .downloads-table td {
-  height: 58px;
+  height: 112px;
+  padding-top: 12px;
+  padding-bottom: 12px;
 }
 
 .downloads-table .col-num {
@@ -665,17 +667,19 @@ a {
 }
 
 .downloads-table .col-actions {
-  width: 160px;
+  width: 212px;
 }
 
 .dl-name {
-  display: block;
+  display: -webkit-box;
   max-width: 100%;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
   text-align: left;
   font-weight: 500;
+  line-height: 1.35;
 }
 
 .dl-name:hover {
@@ -685,13 +689,14 @@ a {
 
 .dl-progress {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 6px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 7px;
+  margin-top: 10px;
 }
 
-.bar {
-  flex: 0 0 160px;
+.dl-progress .bar {
+  width: 100%;
   height: 4px;
   border-radius: 2px;
   background: var(--border);
@@ -717,10 +722,10 @@ a {
 .dl-status {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  color: var(--text-3);
+  flex-wrap: wrap;
+  gap: 4px 7px;
+  color: var(--text-2);
   font-size: 12px;
-  white-space: nowrap;
 }
 
 .dl-status .mono {
@@ -736,6 +741,48 @@ a {
 
 .is-done .dl-status {
   color: var(--ok);
+}
+
+.dl-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.dl-action-primary,
+.dl-action-secondary {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.dl-action-primary .btn-sm {
+  height: 28px;
+  padding: 0 9px;
+  font-size: 12px;
+}
+
+.dl-details-link {
+  height: 28px;
+  padding: 0 5px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.dl-details-link:hover {
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.dl-play-hint {
+  max-width: 100%;
+  color: var(--text-3);
+  font-size: 11px;
+  line-height: 1.3;
+  text-align: right;
 }
 
 .empty-block {
@@ -1033,9 +1080,6 @@ a {
     padding: 0;
     font-size: 0;
     gap: 0;
-  }
-  .bar {
-    flex-basis: 80px;
   }
   .stat-grid {
     grid-template-columns: repeat(3, 1fr);
@@ -2366,26 +2410,49 @@ a {
   overflow: hidden;
 }
 
-/* Torrent Details Drawer Peers Table */
-.torrent-details-peers-table {
-  min-width: 480px;
+/* Torrent Details Drawer Peers */
+.details-peer-list {
+  margin: 0;
+  padding: 0 12px;
+  list-style: none;
 }
 
-.torrent-details-peers-table th,
-.torrent-details-peers-table td {
-  overflow: hidden;
+.details-peer {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
 }
 
-.torrent-details-peers-table .col-addr {
-  width: 170px;
+.details-peer-main {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
 }
 
-.torrent-details-peers-table .col-client {
-  width: 100px;
+.details-peer-address {
+  overflow-wrap: anywhere;
 }
 
-.torrent-details-peers-table .col-adapter {
-  width: 65px;
+.details-peer-client {
+  margin-left: auto;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.details-peer-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-top: 6px;
+  padding-left: 23px;
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.details-peer-meta strong {
+  margin-left: 3px;
+  color: var(--text-2);
+  font-weight: 400;
 }
 
 .channel-badge {
@@ -2765,7 +2832,7 @@ a {
   .topbar-inner { height: auto; min-height: 48px; flex-wrap: wrap; gap: 8px 16px; }
   .tabs { height: 48px; }
   .topbar-status { width: 100%; padding-bottom: 10px; }
-  .downloads-table { min-width: 680px; }
+  .downloads-table { min-width: 920px; }
   .results-table { min-width: 520px; }
   .adapters-table { min-width: 960px; }
   .swarm-modal-head { align-items: flex-start; flex-direction: column; gap: 12px; }

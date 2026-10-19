@@ -64,6 +64,12 @@ export function formatSpeed(bytes) {
   return `${formatBytes(bytes)}/s`;
 }
 
+export function progressPercent(value) {
+  const progress = Number(value);
+  if (!Number.isFinite(progress)) return 0;
+  return Math.round(Math.max(0, Math.min(1, progress)) * 100);
+}
+
 export function formatEta(ms) {
   if (!Number.isFinite(Number(ms)) || Number(ms) <= 0) return '—';
   const s = Math.floor(ms / 1000);

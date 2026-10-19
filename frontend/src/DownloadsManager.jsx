@@ -275,6 +275,7 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
                 const pct = Math.floor(Math.max(0, Math.min(1, t.progress || 0)) * 1000) / 10;
                 const status = statusOf(t);
                 const isFolder = !!t.isFolderFile;
+                const displayName = !isFolder && t.playability?.fileName ? t.playability.fileName : t.name;
 
                 return (
                   <tr key={t.infoHash} className={`dl-row is-${status.key}`}>
@@ -294,9 +295,9 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
                         <button
                           className="dl-name"
                           onClick={() => setDetailsId(t.infoHash)}
-                          title={t.name}
+                          title={displayName === t.name ? t.name : `${displayName} — ${t.name}`}
                         >
-                          {t.name}
+                          {displayName}
                         </button>
                       )}
 
@@ -320,6 +321,12 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
                               )}
                             </>
                           )}
+                          {t.filesCount > 1 && (
+                            <>
+                              <span className="dot-sep" />
+                              {t.filesCount} files
+                            </>
+                          )}
                         </span>
                       </div>
                     </td>
@@ -339,125 +346,100 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
                     </td>
 
                     <td className="col-actions">
-                      <div className="row-actions">
+                      <div className="dl-actions">
                         {isFolder ? (
                           <>
-                            {t.isRecoverable && (
+                            <div className="dl-action-primary">
+                              {t.isRecoverable && (
+                                <button
+                                  className="btn btn-outline btn-sm"
+                                  onClick={() => runAction(t.infoHash, () => resumeRecoverable(t))}
+                                  disabled={pending.has(t.infoHash)}
+                                  title="Resume download halfway"
+                                >
+                                  <Icon name="play" size={13} /> Resume
+                                </button>
+                              )}
+                              {t.playability?.isMedia && (
+                                <button
+                                  className="btn btn-outline btn-sm"
+                                  disabled={!t.playability.canPlay}
+                                  onClick={() => playMedia(t)}
+                                  title={t.playability.reason}
+                                  aria-label={`Play media: ${t.playability.reason}`}
+                                >
+                                  <Icon name="play" size={13} /> Play
+                                </button>
+                              )}
+                            </div>
+                            <div className="dl-action-secondary">
                               <button
-                                className="icon-btn icon-btn-resume"
-                                onClick={() => runAction(t.infoHash, () => resumeRecoverable(t))}
-                                disabled={pending.has(t.infoHash)}
-                                title="Resume download halfway"
-                                aria-label="Resume download halfway"
+                                className="icon-btn"
+                                onClick={() => {
+                                  setMagnetInput(t.magnet || '');
+                                  setResumeModalOpen(true);
+                                }}
+                                title={t.isRecoverable ? 'Resume with custom magnet' : 'Seed / Resume via magnet link'}
+                                aria-label="Resume with magnet link"
                               >
-                                <Icon name="play" />
+                                <Icon name="magnet" />
                               </button>
-                            )}
-                            <button
-                              className="icon-btn"
-                              onClick={() => {
-                                setMagnetInput(t.magnet || '');
-                                setResumeModalOpen(true);
-                              }}
-                              title={t.isRecoverable ? 'Resume with custom magnet' : 'Seed / Resume via magnet link'}
-                              aria-label="Resume with magnet link"
-                            >
-                              <Icon name="magnet" />
-                            </button>
-                            {t.playability?.isMedia && (
-                              <button
-                                className={`icon-btn icon-btn-play ${t.playability.canPlay ? 'is-playable' : 'is-disabled'}`}
-                                disabled={!t.playability.canPlay}
-                                onClick={() => playMedia(t)}
-                                title={t.playability.reason}
-                                aria-label={t.playability.reason}
-                              >
-                                <Icon name="play" />
+                              <button className="icon-btn" onClick={() => reveal(t.folderItemName || t.name)} title="Show in Finder" aria-label="Show in Finder">
+                                <Icon name="folder" />
                               </button>
-                            )}
-                            <button
-                              className="icon-btn"
-                              onClick={() => reveal(t.folderItemName || t.name)}
-                              title="Show in Finder"
-                              aria-label="Show in Finder"
-                            >
-                              <Icon name="folder" />
-                            </button>
-                            <button
-                              className="icon-btn icon-btn-danger"
-                              onClick={() => promptRemove(t)}
-                              title="Delete from disk"
-                              aria-label="Delete from disk"
-                            >
-                              <Icon name="trash" />
-                            </button>
+                              <button className="icon-btn icon-btn-danger" onClick={() => promptRemove(t)} title="Delete from disk" aria-label="Delete from disk">
+                                <Icon name="trash" />
+                              </button>
+                            </div>
                           </>
                         ) : (
                           <>
-                            {!t.done && (
-                              <button
-                                className="icon-btn"
-                                onClick={() => runAction(t.infoHash, () => togglePause(t))}
-                                disabled={pending.has(t.infoHash)}
-                                title={t.paused ? 'Resume download' : 'Pause download'}
-                                aria-label={t.paused ? 'Resume download' : 'Pause download'}
-                              >
-                                <Icon name={t.paused ? 'play' : 'pause'} />
+                            <div className="dl-action-primary">
+                              {!t.done && (
+                                <button
+                                  className="btn btn-outline btn-sm"
+                                  onClick={() => runAction(t.infoHash, () => togglePause(t))}
+                                  disabled={pending.has(t.infoHash)}
+                                  title={t.paused ? 'Resume download' : 'Pause download'}
+                                >
+                                  <Icon name={t.paused ? 'play' : 'pause'} size={13} /> {t.paused ? 'Resume' : 'Pause'}
+                                </button>
+                              )}
+                              {t.playability?.isMedia && (
+                                <button
+                                  className="btn btn-outline btn-sm"
+                                  disabled={!t.playability.canPlay}
+                                  onClick={() => playMedia(t)}
+                                  title={t.playability.reason}
+                                  aria-label={`Play media: ${t.playability.reason}`}
+                                >
+                                  <Icon name="play" size={13} /> Play
+                                </button>
+                              )}
+                            </div>
+                            <div className="dl-action-secondary">
+                              <button className="icon-btn" onClick={() => runAction(t.infoHash, () => recheckTorrent(t.infoHash, t.name))} disabled={pending.has(t.infoHash)} title="Force Recheck / Verify local data on disk" aria-label="Force Recheck">
+                                <Icon name="refresh" />
                               </button>
-                            )}
-                            <button
-                              className="icon-btn"
-                              onClick={() => runAction(t.infoHash, () => recheckTorrent(t.infoHash, t.name))}
-                              disabled={pending.has(t.infoHash)}
-                              title="Force Recheck / Verify local data on disk"
-                              aria-label="Force Recheck"
-                            >
-                              <Icon name="refresh" />
-                            </button>
-                            {t.playability?.isMedia && (
-                              <button
-                                className={`icon-btn icon-btn-play ${t.playability.canPlay ? 'is-playable' : 'is-disabled'}`}
-                                disabled={!t.playability.canPlay}
-                                onClick={() => playMedia(t)}
-                                title={t.playability.reason}
-                                aria-label={t.playability.reason}
-                              >
-                                <Icon name="play" />
+                              <button className="icon-btn" onClick={() => reveal(t.infoHash)} title="Show in Finder" aria-label="Show in Finder">
+                                <Icon name="folder" />
                               </button>
-                            )}
-                            <button
-                              className="icon-btn"
-                              onClick={() => reveal(t.infoHash)}
-                              title="Show in Finder"
-                              aria-label="Show in Finder"
-                            >
-                              <Icon name="folder" />
-                            </button>
-                            <button
-                              className="icon-btn"
-                              onClick={() => setSwarmTorrent(t)}
-                              title="Peers and pieces"
-                              aria-label="Peers and pieces"
-                            >
-                              <Icon name="globe" />
-                            </button>
-                            <button
-                              className="icon-btn"
-                              onClick={() => setDetailsId(t.infoHash)}
-                              title="Details"
-                              aria-label="Details"
-                            >
-                              <Icon name="info" />
-                            </button>
-                            <button
-                              className="icon-btn icon-btn-danger"
-                              onClick={() => promptRemove(t)}
-                              title="Remove"
-                              aria-label="Remove"
-                            >
-                              <Icon name="trash" />
-                            </button>
+                              <button className="icon-btn" onClick={() => setSwarmTorrent(t)} title="Peers and pieces" aria-label="Peers and pieces">
+                                <Icon name="globe" />
+                              </button>
+                              <button className="dl-details-link" onClick={() => setDetailsId(t.infoHash)} title="Details">
+                                Details
+                              </button>
+                              <button className="icon-btn icon-btn-danger" onClick={() => promptRemove(t)} title="Remove" aria-label="Remove">
+                                <Icon name="trash" />
+                              </button>
+                            </div>
                           </>
+                        )}
+                        {t.playability?.isMedia && !t.playability.canPlay && (
+                          <span className="dl-play-hint" title={t.playability.reason}>
+                            {t.paused ? 'Resume to buffer playback' : 'Waiting for enough buffer to play'}
+                          </span>
                         )}
                       </div>
                     </td>
