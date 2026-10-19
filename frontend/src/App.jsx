@@ -6,10 +6,10 @@ import { Icon } from './Icon';
 import { apiGet, formatSpeed } from './lib';
 
 const routeFromPath = () => {
-  const p = window.location.pathname;
-  const h = window.location.hash;
-  if (p.startsWith('/downloads') || h.includes('downloads')) return 'downloads';
-  if (p.startsWith('/networks') || h.includes('networks')) return 'networks';
+  const p = window.location.pathname.replace(/\/+$/, '') || '/';
+  const h = window.location.hash.replace(/^#\/?/, '').split(/[?&]/)[0];
+  if (p === '/downloads' || (p === '/' && h === 'downloads')) return 'downloads';
+  if (p === '/networks' || (p === '/' && h === 'networks')) return 'networks';
   return 'search';
 };
 
@@ -19,27 +19,64 @@ function App() {
   const [backendUp, setBackendUp] = useState(true);
   const [toast, setToast] = useState(null);
   const toastTimer = useRef(null);
+  const polling = useRef(null);
+  const mainRef = useRef(null);
+  const previousRoute = useRef(route);
 
-  const refreshTorrents = useCallback(async () => {
-    try {
-      const list = await apiGet('/torrents');
-      setTorrents(Array.isArray(list) ? list : []);
-      setBackendUp(true);
-    } catch {
-      setBackendUp(false);
+  const refreshTorrents = useCallback(function refresh() {
+    const session = polling.current;
+    if (!session?.active) return Promise.resolve();
+    clearTimeout(session.timer);
+    if (session.promise) {
+      // A refresh after a mutation must run after the current snapshot finishes.
+      session.queued = true;
+      return session.promise;
     }
+    session.promise = (async () => {
+      do {
+        session.queued = false;
+        session.controller = new AbortController();
+        try {
+          const list = await apiGet('/torrents', { signal: session.controller.signal, timeoutMs: 10000 });
+          if (!Array.isArray(list) || list.some((t) => !t || typeof t !== 'object' ||
+            typeof t.infoHash !== 'string' || typeof t.name !== 'string')) {
+            throw new Error('Invalid downloads response');
+          }
+          if (session.active && !session.queued) {
+            setTorrents(list);
+            setBackendUp(true);
+          }
+        } catch {
+          if (session.active && !session.queued) setBackendUp(false);
+        }
+      } while (session.active && session.queued);
+    })().finally(() => {
+      session.promise = null;
+      if (session.active) session.timer = setTimeout(refresh, 1500);
+    });
+    return session.promise;
   }, []);
 
   useEffect(() => {
+    const session = { active: true, queued: false, promise: null, controller: null, timer: null };
+    polling.current = session;
     refreshTorrents();
-    const id = setInterval(refreshTorrents, 1500);
-    return () => clearInterval(id);
+    return () => {
+      session.active = false;
+      session.controller?.abort();
+      clearTimeout(session.timer);
+      clearTimeout(toastTimer.current);
+    };
   }, [refreshTorrents]);
 
   useEffect(() => {
     const onPop = () => setRoute(routeFromPath());
     window.addEventListener('popstate', onPop);
-    return () => window.removeEventListener('popstate', onPop);
+    window.addEventListener('hashchange', onPop);
+    return () => {
+      window.removeEventListener('popstate', onPop);
+      window.removeEventListener('hashchange', onPop);
+    };
   }, []);
 
   useEffect(() => {
@@ -49,6 +86,8 @@ function App() {
         : route === 'networks'
         ? 'Networks · Svorrent'
         : 'Svorrent';
+    if (previousRoute.current !== route) mainRef.current?.focus();
+    previousRoute.current = route;
   }, [route]);
 
   const navigate = (next) => {
@@ -58,7 +97,14 @@ function App() {
     setRoute(next);
   };
 
+  const followRoute = (event, next) => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    navigate(next);
+  };
+
   const notify = useCallback((message, tone = 'default') => {
+    if (!polling.current?.active) return;
     clearTimeout(toastTimer.current);
     setToast({ message, tone, key: Date.now() });
     toastTimer.current = setTimeout(() => setToast(null), 3200);
@@ -66,8 +112,9 @@ function App() {
 
   const downloads = torrents;
   const active = downloads.filter((t) => !t.done && !t.paused).length;
-  const down = downloads.reduce((sum, t) => sum + (t.downloadSpeed || 0), 0);
-  const up = downloads.reduce((sum, t) => sum + (t.uploadSpeed || 0), 0);
+  const speed = (value) => Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 0;
+  const down = downloads.reduce((sum, t) => sum + speed(t.downloadSpeed), 0);
+  const up = downloads.reduce((sum, t) => sum + speed(t.uploadSpeed), 0);
 
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -83,42 +130,45 @@ function App() {
           <a
             href="/"
             className="wordmark"
-            onClick={(e) => {
-              e.preventDefault();
-              navigate('search');
-            }}
+            onClick={(e) => followRoute(e, 'search')}
           >
             svorrent
           </a>
 
           <nav className="tabs" aria-label="Primary">
-            <button
+            <a
               id="nav-search"
+              href="/"
+              aria-current={route === 'search' ? 'page' : undefined}
               className={`tab ${route === 'search' ? 'is-active' : ''}`}
-              onClick={() => navigate('search')}
+              onClick={(e) => followRoute(e, 'search')}
             >
               Search
-            </button>
-            <button
+            </a>
+            <a
               id="nav-downloads"
+              href="/downloads"
+              aria-current={route === 'downloads' ? 'page' : undefined}
               className={`tab ${route === 'downloads' ? 'is-active' : ''}`}
-              onClick={() => navigate('downloads')}
+              onClick={(e) => followRoute(e, 'downloads')}
             >
               Downloads
               {downloads.length > 0 && <span className="tab-count">{downloads.length}</span>}
-            </button>
-            <button
+            </a>
+            <a
               id="nav-networks"
+              href="/networks"
+              aria-current={route === 'networks' ? 'page' : undefined}
               className={`tab ${route === 'networks' ? 'is-active' : ''}`}
-              onClick={() => navigate('networks')}
+              onClick={(e) => followRoute(e, 'networks')}
             >
               Networks
-            </button>
+            </a>
           </nav>
 
           <div className="topbar-status">
             {!backendUp ? (
-              <span className="status-offline">Backend offline</span>
+              <span className="status-offline" role="status">Backend unavailable</span>
             ) : (
               <>
                 <span className="rate" title="Total download rate">
@@ -136,9 +186,9 @@ function App() {
         </div>
       </header>
 
-      <main className="page">
+      <main className="page" ref={mainRef} tabIndex={-1} aria-label={route === 'search' ? 'Search' : route === 'downloads' ? 'Downloads' : 'Networks'}>
         <div style={{ display: route === 'search' ? 'block' : 'none' }}>
-          <SearchPage initialQuery={searchTerm} notify={notify} onDownloadAdded={refreshTorrents} />
+          <SearchPage initialQuery={searchTerm} isActive={route === 'search'} notify={notify} onDownloadAdded={refreshTorrents} />
         </div>
         <div style={{ display: route === 'downloads' ? 'block' : 'none' }}>
           <DownloadsManager

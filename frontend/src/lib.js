@@ -1,41 +1,71 @@
-export const API = typeof window !== 'undefined' && (window.location.port === '3001' || !window.location.port)
-  ? '/api'
-  : 'http://localhost:3001/api';
+export const API = '/api';
 
-export async function apiGet(path) {
-  const res = await fetch(`${API}${path}`);
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
-  return data;
+async function request(path, init, { signal, timeoutMs = 30000 } = {}) {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  let timedOut = false;
+  if (signal?.aborted) abort();
+  else signal?.addEventListener('abort', abort, { once: true });
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
+  try {
+    const res = await fetch(`${API}${path}`, { ...init, signal: controller.signal });
+    let data;
+    try {
+      data = res.status === 204 ? {} : await res.json();
+    } catch (error) {
+      if (controller.signal.aborted) throw error;
+      throw new Error(res.ok ? 'The server returned an invalid response.' : `Request failed (${res.status})`);
+    }
+    controller.signal.throwIfAborted();
+    if (!res.ok) {
+      throw new Error(typeof data?.error === 'string' ? data.error : `Request failed (${res.status})`);
+    }
+    if (!data || typeof data !== 'object') throw new Error('The server returned an invalid response.');
+    if (typeof data.error === 'string' && data.error) throw new Error(data.error);
+    if (data.success === false) throw new Error('The server could not complete the request.');
+    return data;
+  } catch (error) {
+    if (timedOut) throw new Error('The request timed out. Please try again.');
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
+  }
 }
 
-export async function apiPost(path, body) {
-  const res = await fetch(`${API}${path}`, {
+export function apiGet(path, options) {
+  return request(path, {}, options);
+}
+
+export function apiPost(path, body, options) {
+  return request(path, {
     method: 'POST',
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
-  return data;
+    headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  }, options);
 }
 
 
 export function formatBytes(bytes) {
-  if (!bytes || bytes <= 0) return '0 B';
+  bytes = Number(bytes);
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const i = Math.max(0, Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1));
   const value = bytes / Math.pow(1024, i);
   return `${value >= 100 || i === 0 ? Math.round(value) : value.toFixed(1)} ${units[i]}`;
 }
 
 export function formatSpeed(bytes) {
-  if (!bytes) return '—';
+  if (!Number.isFinite(Number(bytes)) || Number(bytes) <= 0) return '—';
   return `${formatBytes(bytes)}/s`;
 }
 
 export function formatEta(ms) {
-  if (!ms || !isFinite(ms)) return '—';
+  if (!Number.isFinite(Number(ms)) || Number(ms) <= 0) return '—';
   const s = Math.floor(ms / 1000);
   const d = Math.floor(s / 86400);
   const h = Math.floor((s % 86400) / 3600);
@@ -52,12 +82,14 @@ export function parseSize(str) {
   const match = String(str).replace(/,/g, '').match(/([\d.]+)\s*([KMGT]?)i?B/i);
   if (!match) return 0;
   const power = { '': 0, K: 1, M: 2, G: 3, T: 4 }[match[2].toUpperCase()] ?? 0;
-  return parseFloat(match[1]) * Math.pow(1024, power);
+  const bytes = Number(match[1]) * Math.pow(1024, power);
+  return Number.isFinite(bytes) ? bytes : 0;
 }
 
 export function formatDate(ms) {
   if (!ms) return '—';
   const d = new Date(ms);
+  if (!Number.isFinite(d.getTime())) return '—';
   const now = new Date();
   const diffDays = Math.floor((now - d) / (1000 * 60 * 60 * 24));
   if (diffDays === 0) {
@@ -68,4 +100,3 @@ export function formatDate(ms) {
   }
   return d.toLocaleDateString([], { month: 'short', day: 'numeric', year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined });
 }
-

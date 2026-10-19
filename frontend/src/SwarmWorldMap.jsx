@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import worldMapRawSvg from './assets/world-map.svg?raw';
 import { countryFlag, countryName } from './countryUtils';
 import { formatSpeed } from './lib';
@@ -38,6 +38,7 @@ export function SwarmWorldMap({
           upSpeed: 0,
           wifiCount: 0,
           tetherCount: 0,
+          interfaces: new Map(),
           cities: new Set(),
           clients: new Set(),
         });
@@ -49,9 +50,11 @@ export function SwarmWorldMap({
       item.upSpeed += p.uploadSpeed || 0;
       if (p.networkDevice === 'feth0' || p.networkType === 'cellular') {
         item.tetherCount++;
-      } else {
+      } else if (p.networkType === 'wifi') {
         item.wifiCount++;
       }
+      const iface = p.networkInterface || p.networkDevice || 'Unknown';
+      item.interfaces.set(iface, (item.interfaces.get(iface) || 0) + 1);
       if (p.geo.city) item.cities.add(p.geo.city);
       if (p.client && p.client !== 'Unknown') item.clients.add(p.client);
     }
@@ -120,9 +123,9 @@ export function SwarmWorldMap({
   // Extract inner SVG markup from worldMapRawSvg
   const innerSvgMarkup = useMemo(() => {
     const start = worldMapRawSvg.indexOf('<g>');
-    const end = worldMapRawSvg.lastIndexOf('</g>') + 4;
-    if (start !== -1 && end !== -1) {
-      return worldMapRawSvg.slice(start, end);
+    const end = worldMapRawSvg.lastIndexOf('</g>');
+    if (start !== -1 && end > start) {
+      return worldMapRawSvg.slice(start, end + 4);
     }
     return '';
   }, []);
@@ -197,6 +200,8 @@ export function SwarmWorldMap({
               const code = countryEl.id.toLowerCase();
               if (countryPeerMap.has(code)) {
                 setHoveredCountry(code);
+              } else {
+                setHoveredCountry(null);
               }
             }
           }}
@@ -233,6 +238,16 @@ export function SwarmWorldMap({
                 key={data.code}
                 transform={`translate(${pos.x}, ${pos.y})`}
                 className={`swarm-pin ${isSelected ? 'is-selected' : ''} ${isHovered ? 'is-hovered' : ''}`}
+                role="button"
+                tabIndex={0}
+                aria-label={`${data.name}: ${data.peers.length} peers`}
+                aria-pressed={isSelected}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onSelectCountry(isSelected ? null : data.code);
+                  }
+                }}
                 onClick={(e) => {
                   e.stopPropagation();
                   onSelectCountry(selectedCountry === data.code ? null : data.code);
@@ -294,7 +309,7 @@ export function SwarmWorldMap({
         <div
           className="swarm-tooltip"
           style={{
-            left: `${Math.min(window.innerWidth - 260, Math.max(16, mousePos.x + 14))}px`,
+            left: `${Math.max(8, Math.min((containerRef.current?.clientWidth || 260) - 238, mousePos.x + 14))}px`,
             top: `${Math.max(16, mousePos.y - 70)}px`,
           }}
         >
@@ -323,9 +338,7 @@ export function SwarmWorldMap({
             <div className="tooltip-row">
               <span className="tooltip-label">Interfaces</span>
               <span className="tooltip-val mono">
-                {hoveredData.wifiCount > 0 && <span className="chan-wifi">Wi-Fi ({hoveredData.wifiCount})</span>}
-                {hoveredData.wifiCount > 0 && hoveredData.tetherCount > 0 && ' · '}
-                {hoveredData.tetherCount > 0 && <span className="chan-tether">USB ({hoveredData.tetherCount})</span>}
+                {[...hoveredData.interfaces].map(([name, count]) => `${name} (${count})`).join(' · ')}
               </span>
             </div>
             {hoveredData.clients.size > 0 && (

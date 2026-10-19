@@ -10,7 +10,7 @@
 
   --text: #e7e7e5;
   --text-2: #a3a4a8;
-  --text-3: #6e7076;
+  --text-3: #92949b;
 
   --accent: #5b8dee;
   --ok: #57ab72;
@@ -254,29 +254,6 @@ a {
   to {
     transform: rotate(360deg);
   }
-}
-
-/* Subtle Network Rescan Blip */
-@keyframes subtleBlip {
-  0% {
-    opacity: 1;
-    filter: brightness(1);
-  }
-  30% {
-    opacity: 0.72;
-    filter: brightness(1.18);
-  }
-  100% {
-    opacity: 1;
-    filter: brightness(1);
-  }
-}
-
-.networks-page.blip-flash .network-kpi-grid,
-.networks-page.blip-flash .infographics-panel,
-.networks-page.blip-flash .adapters-section,
-.networks-page.blip-flash .bandwidth-chart-wrap {
-  animation: subtleBlip 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .btn-done {
@@ -597,6 +574,22 @@ a {
   align-items: flex-end;
   justify-content: space-between;
   margin-bottom: 20px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.page-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.field .input {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
 }
 
 .page-title {
@@ -1087,12 +1080,12 @@ a {
   border-radius: 4px;
   border: 1px solid var(--border);
   color: var(--text);
-  font-family: var(--font-mono);
+  font-family: var(--mono);
 }
 
 .network-kpi-grid {
-  grid-template-columns: repeat(4, 1fr) !important;
-  margin: 0 0 24px 0 !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0 0 24px;
   background: var(--surface);
 }
 
@@ -1104,11 +1097,9 @@ a {
 }
 
 .stat-label {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--text-3);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
 .stat-value {
@@ -1161,7 +1152,7 @@ a {
     grid-template-columns: 1fr;
   }
   .network-kpi-grid {
-    grid-template-columns: repeat(2, 1fr) !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -1317,6 +1308,9 @@ a {
 
 .adapters-section .section-head {
   margin-bottom: 12px;
+  background: transparent;
+  padding: 0;
+  border: 0;
 }
 
 .adapters-section .section-title {
@@ -1397,7 +1391,7 @@ a {
   flex-shrink: 0;
 }
 
-/* Minimal switch toggle (non-vibecoded macOS style) */
+/* Adapter switch */
 .btn-toggle {
   width: 32px;
   height: 18px;
@@ -1510,6 +1504,8 @@ a {
   border-radius: var(--radius);
   width: 100%;
   max-width: 520px;
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
   animation: rise 0.15s ease-out;
 }
@@ -1556,24 +1552,7 @@ a {
   gap: 10px;
 }
 
-.delete-modal-icon-badge {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  background: rgba(217, 98, 90, 0.14);
-  color: var(--danger);
-  border: 1px solid rgba(217, 98, 90, 0.28);
-  flex-shrink: 0;
-}
-
 .delete-target-preview {
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 11px 13px;
   display: flex;
   flex-direction: column;
   gap: 5px;
@@ -1599,18 +1578,14 @@ a {
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  padding: 12px 14px;
-  border-radius: var(--radius);
-  border: 1px solid var(--border-strong);
-  background: var(--surface-2);
+  padding: 10px 0;
   cursor: pointer;
   user-select: none;
   transition: border-color 0.15s, background-color 0.15s;
 }
 
 .delete-disk-option:hover {
-  border-color: var(--text-2);
-  background: var(--hover);
+  color: var(--text);
 }
 
 .delete-disk-checkbox {
@@ -1643,7 +1618,7 @@ a {
 .delete-impact-notice {
   font-size: 12px;
   line-height: 1.45;
-  padding: 9px 13px;
+  padding: 9px 0;
   border-radius: var(--radius);
   display: flex;
   align-items: center;
@@ -1652,14 +1627,10 @@ a {
 }
 
 .delete-impact-notice.is-safe {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--border);
   color: var(--text-2);
 }
 
 .delete-impact-notice.is-danger {
-  background: rgba(217, 98, 90, 0.12);
-  border: 1px solid rgba(217, 98, 90, 0.32);
   color: #ffa39e;
 }
 
@@ -1729,16 +1700,7 @@ a {
 
 /* Swarm Modal (Per-Torrent Inspector) */
 .swarm-modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.76);
-  backdrop-filter: blur(5px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  padding: 20px;
-  animation: fadeIn 0.15s ease-out;
+  z-index: 60;
 }
 
 .swarm-modal-dialog {
@@ -1750,7 +1712,6 @@ a {
   max-height: 92vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.75);
   overflow: hidden;
   animation: rise 0.15s ease-out;
 }
@@ -1773,17 +1734,8 @@ a {
   min-width: 0;
 }
 
-.swarm-modal-icon-badge {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 6px;
-  background: rgba(56, 189, 248, 0.1);
-  border: 1px solid rgba(56, 189, 248, 0.25);
-  color: #38bdf8;
-  flex-shrink: 0;
+.swarm-modal-title-wrap > div {
+  min-width: 0;
 }
 
 .swarm-modal-title {
@@ -1979,13 +1931,9 @@ a {
 }
 
 /* Peer Pins Layer */
-.swarm-pin {
-  transition: transform 0.12s ease-out;
-}
-
 .swarm-pin:hover,
 .swarm-pin.is-hovered {
-  transform: scale(1.22);
+  opacity: 0.85;
 }
 
 .swarm-pin.is-selected circle {
@@ -2086,6 +2034,8 @@ a {
 }
 
 .country-row {
+  text-align: left;
+  border: 1px solid transparent;
   padding: 8px 10px;
   border-radius: 4px;
   cursor: pointer;
@@ -2366,12 +2316,12 @@ a {
 }
 
 .view-toggle-btn:hover {
-  color: var(--text-1);
+  color: var(--text);
 }
 
 .view-toggle-btn.is-active {
   background: var(--surface);
-  color: var(--text-1);
+  color: var(--text);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
 
@@ -2424,12 +2374,11 @@ a {
 }
 
 .piece-block.is-verified {
-  background: #10b981;
+  background: var(--ok);
 }
 
 .piece-block.is-downloading {
-  background: #38bdf8;
-  animation: pulseBlock 1.2s infinite ease-in-out;
+  background: var(--accent);
 }
 
 .piece-block.is-missing {
@@ -2440,11 +2389,6 @@ a {
   outline: 2px solid #f59e0b;
   outline-offset: 1px;
   z-index: 2;
-}
-
-@keyframes pulseBlock {
-  0%, 100% { opacity: 0.6; }
-  50% { opacity: 1; }
 }
 
 .swarm-rarity-row {
@@ -2507,7 +2451,7 @@ a {
   padding-top: 4px;
 }
 
-.legend-item {
+.grid-legend .legend-item {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -2520,11 +2464,11 @@ a {
 }
 
 .legend-box.verified {
-  background: #10b981;
+  background: var(--ok);
 }
 
 .legend-box.downloading {
-  background: #38bdf8;
+  background: var(--accent);
 }
 
 .legend-box.missing {
@@ -2620,14 +2564,14 @@ a {
 }
 
 .proto-utp {
-  background: rgba(168, 85, 247, 0.12);
-  color: #c084fc;
-  border: 1px solid rgba(168, 85, 247, 0.25);
+  background: var(--surface-2);
+  color: var(--text-2);
+  border: 1px solid var(--border);
 }
 
 .protocol-badge {
   font-size: 11px;
-  font-family: var(--font-mono);
+  font-family: var(--mono);
   font-weight: 600;
   padding: 2px 6px;
   border-radius: 4px;
@@ -2640,9 +2584,27 @@ a {
 }
 
 .badge-utp {
-  background: rgba(168, 85, 247, 0.1);
-  color: #c084fc;
-  border: 1px solid rgba(168, 85, 247, 0.25);
+  background: var(--surface-2);
+  color: var(--text-2);
+  border: 1px solid var(--border);
+}
+
+@media (max-width: 600px) {
+  .topbar-inner { height: auto; min-height: 48px; flex-wrap: wrap; gap: 8px 16px; }
+  .tabs { height: 48px; }
+  .topbar-status { width: 100%; padding-bottom: 10px; }
+  .downloads-table { min-width: 680px; }
+  .results-table { min-width: 520px; }
+  .adapters-table { min-width: 760px; }
+  .swarm-modal-head { align-items: flex-start; flex-direction: column; gap: 12px; }
+  .swarm-head-actions { width: 100%; justify-content: space-between; }
+  .modal-backdrop { padding: 10px; }
+  .modal { max-height: calc(100dvh - 20px); }
+  .swarm-modal-body { padding: 12px; }
+  .table-filter-bar, .frontier-metrics, .rarity-label-bar { flex-wrap: wrap; gap: 8px; }
+  .network-kpi-grid > div { border: 0; }
+  .network-kpi-grid > div:nth-child(even) { border-left: 1px solid var(--border); }
+  .network-kpi-grid > div:nth-child(n + 3) { border-top: 1px solid var(--border); }
 }
 
 .flag-choked {
@@ -2654,4 +2616,3 @@ a {
   color: #10b981;
   font-weight: 600;
 }
-

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from './Icon';
 import { apiGet, apiPost, parseSize } from './lib';
 
@@ -16,7 +16,27 @@ function seedClass(seeds) {
   return 'seeds-low';
 }
 
-export function SearchPage({ notify, onDownloadAdded, initialQuery }) {
+function safeLink(value) {
+  if (typeof value !== 'string') return '';
+  try {
+    const url = new URL(value);
+    return ['http:', 'https:'].includes(url.protocol) ? url.href : '';
+  } catch {
+    return '';
+  }
+}
+
+function validMagnet(value) {
+  if (typeof value !== 'string') return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'magnet:' && !!url.searchParams.get('xt');
+  } catch {
+    return false;
+  }
+}
+
+export function SearchPage({ notify, onDownloadAdded, initialQuery, isActive = true }) {
   const [query, setQuery] = useState(initialQuery || '');
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -27,66 +47,126 @@ export function SearchPage({ notify, onDownloadAdded, initialQuery }) {
   const [rowState, setRowState] = useState({});
 
   const inputRef = useRef(null);
-  const activeTerm = useRef('');
+  const searchId = useRef(0);
+  const searchController = useRef(null);
+  const resultId = useRef(0);
+  const mounted = useRef(false);
+  const active = useRef(isActive);
+  const actions = useRef(new Map());
   const debounce = useRef(null);
 
-  const runSearch = async (raw) => {
-    const term = raw.trim();
+  const cancelSearch = useCallback(() => {
     clearTimeout(debounce.current);
+    searchController.current?.abort();
+    searchId.current += 1;
+  }, []);
+
+  const runSearch = useCallback(async (raw) => {
+    const term = raw.trim();
+    cancelSearch();
     if (!term) return;
 
-    activeTerm.current = term;
+    const id = searchId.current;
+    const controller = new AbortController();
+    searchController.current = controller;
     setLoading(true);
     setError('');
 
     try {
-      const data = await apiGet(`/search?q=${encodeURIComponent(term)}`);
-      if (activeTerm.current !== term) return;
-      setResults(Array.isArray(data) ? data : []);
+      const data = await apiGet(`/search?q=${encodeURIComponent(term)}`, { signal: controller.signal, timeoutMs: 15000 });
+      if (!mounted.current || searchId.current !== id) return;
+      if (!Array.isArray(data) || data.some((r) => !r || typeof r.title !== 'string' || typeof r.provider !== 'string')) {
+        throw new Error('The server returned invalid search results. Please try again.');
+      }
+      const count = (value) => {
+        const number = Number(typeof value === 'string' ? value.replace(/,/g, '') : value);
+        return Number.isFinite(number) ? Math.max(0, number) : 0;
+      };
+      resultId.current = id;
+      setResults(data.map((r, index) => ({
+        ...r,
+        _id: `${id}:${index}`,
+        _generation: id,
+        size: typeof r.size === 'string' ? r.size : '',
+        seeds: count(r.seeds),
+        peers: count(r.peers),
+        magnet: validMagnet(r.magnet) ? r.magnet : '',
+        desc: typeof r.desc === 'string' ? r.desc : '',
+        link: safeLink(r.link),
+      })));
       setRowState({});
       setSource('all');
       setSearchedTerm(term);
-    } catch {
-      if (activeTerm.current === term) setError('Could not reach the search backend. Is the server running on port 3001?');
+    } catch (err) {
+      if (mounted.current && searchId.current === id && !controller.signal.aborted) {
+        setError(err.message || 'Could not search. Please try again.');
+      }
     } finally {
-      if (activeTerm.current === term) setLoading(false);
+      if (mounted.current && searchId.current === id) setLoading(false);
     }
-  };
+  }, [cancelSearch]);
 
-  const [prevInitial, setPrevInitial] = useState(initialQuery);
-  if (initialQuery !== prevInitial) {
-    setPrevInitial(initialQuery);
-    if (initialQuery && initialQuery.trim()) {
+  useEffect(() => {
+    active.current = isActive;
+  }, [isActive]);
+
+  useEffect(() => {
+    mounted.current = true;
+    const pending = actions.current;
+    return () => {
+      mounted.current = false;
+      cancelSearch();
+      for (const controller of pending.values()) controller.abort();
+      pending.clear();
+    };
+  }, [cancelSearch]);
+
+  useEffect(() => {
+    if (typeof initialQuery === 'string') {
+      cancelSearch();
+      setLoading(false);
       setQuery(initialQuery.trim());
+      if (!initialQuery.trim()) {
+        resultId.current = searchId.current;
+        setResults([]);
+        setSearchedTerm('');
+        setError('');
+        setRowState({});
+        setSource('all');
+      }
     }
-  }
+  }, [initialQuery, cancelSearch]);
 
   // Search after user stops typing
   useEffect(() => {
     const term = query.trim();
-    clearTimeout(debounce.current);
+    cancelSearch();
+    setLoading(false);
     if (term.length < 2) return;
     debounce.current = setTimeout(() => runSearch(term), 450);
-    return () => clearTimeout(debounce.current);
-  }, [query]);
+    return cancelSearch;
+  }, [query, runSearch, cancelSearch]);
 
   // "/" focuses search field from anywhere on the page
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key === '/' && inputRef.current?.offsetParent && document.activeElement?.tagName !== 'INPUT') {
+      const target = e.target;
+      const editing = target instanceof Element && (target.closest('input, textarea, select, [role="textbox"], [role="dialog"], dialog') || target.isContentEditable);
+      if (isActive && e.key === '/' && !e.defaultPrevented && !e.isComposing &&
+        !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && !editing && inputRef.current?.offsetParent) {
         e.preventDefault();
         inputRef.current?.focus();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [isActive]);
 
   const sources = useMemo(() => [...new Set(results.map((r) => r.provider).filter(Boolean))].sort(), [results]);
 
   const rows = useMemo(() => {
     const list = results
-      .map((r, i) => ({ ...r, _id: i, _bytes: parseSize(r.size) }))
+      .map((r) => ({ ...r, _bytes: parseSize(r.size) }))
       .filter((r) => source === 'all' || r.provider === source);
 
     const dir = sort.dir === 'asc' ? 1 : -1;
@@ -104,52 +184,65 @@ export function SearchPage({ notify, onDownloadAdded, initialQuery }) {
     );
   };
 
-  const setRow = (id, value) => setRowState((prev) => ({ ...prev, [id]: value }));
+  const isCurrent = (t, controller) => mounted.current && !controller.signal.aborted && resultId.current === t._generation;
+  const setRow = (t, controller, value) => {
+    if (isCurrent(t, controller)) setRowState((prev) => ({ ...prev, [t._id]: value }));
+  };
 
-  const resolveMagnet = async (t) => {
-    if (t.magnet) return t.magnet;
+  const resolveMagnet = async (t, controller) => {
+    if (validMagnet(t.magnet)) return t.magnet;
     const params = new URLSearchParams({ provider: t.provider, desc: t.desc || '', link: t.link || '' });
-    const data = await apiGet(`/magnet?${params}`);
-    setResults((prev) => prev.map((r, i) => (i === t._id ? { ...r, magnet: data.magnet } : r)));
+    const data = await apiGet(`/magnet?${params}`, { signal: controller.signal });
+    if (!validMagnet(data.magnet)) throw new Error('The server did not return a valid magnet link.');
+    if (isCurrent(t, controller)) {
+      setResults((prev) => prev.map((r) => (r._id === t._id ? { ...r, magnet: data.magnet } : r)));
+    }
     return data.magnet;
   };
 
-  const handleDownload = async (t) => {
-    setRow(t._id, 'adding');
+  const handleAction = async (t, action) => {
+    if (actions.current.has(t._id) || (action === 'adding' && rowState[t._id] === 'added')) return;
+    const controller = new AbortController();
+    const previous = rowState[t._id];
+    actions.current.set(t._id, controller);
+    setRow(t, controller, action);
     try {
-      await apiPost('/torrent/download', { magnet: t.magnet, provider: t.provider, desc: t.desc, link: t.link });
-      setRow(t._id, 'added');
-      notify('Added to downloads. Saving to ~/Downloads/Svorrent');
-      onDownloadAdded?.();
+      if (action === 'adding') {
+        const data = await apiPost('/torrent/download', { magnet: t.magnet, provider: t.provider, desc: t.desc, link: t.link }, { signal: controller.signal });
+        if (data.success !== true || typeof data.infoHash !== 'string') throw new Error('The server did not confirm the download. Check Downloads before retrying.');
+        setRow(t, controller, 'added');
+        if (mounted.current && !controller.signal.aborted) {
+          notify('Added to downloads.');
+          onDownloadAdded?.();
+        }
+      } else {
+        const magnet = await resolveMagnet(t, controller);
+        if (!isCurrent(t, controller)) return;
+        if (!active.current) return;
+        if (action === 'opening') window.location.assign(magnet);
+        else {
+          await navigator.clipboard.writeText(magnet);
+          if (isCurrent(t, controller)) notify('Magnet link copied');
+        }
+      }
     } catch (err) {
-      setRow(t._id, null);
-      notify(err.message || 'Could not start download', 'error');
-    }
-  };
-
-  const handleOpenMagnet = async (t) => {
-    try {
-      window.location.href = await resolveMagnet(t);
-    } catch {
-      notify('Could not resolve magnet link', 'error');
-    }
-  };
-
-  const handleCopyMagnet = async (t) => {
-    try {
-      await navigator.clipboard.writeText(await resolveMagnet(t));
-      notify('Magnet link copied');
-    } catch {
-      notify('Could not copy magnet link', 'error');
+      setRow(t, controller, previous || null);
+      if (isCurrent(t, controller)) notify(err.message || 'Could not complete the action.', 'error');
+    } finally {
+      if (action !== 'adding') setRow(t, controller, previous || null);
+      if (actions.current.get(t._id) === controller) actions.current.delete(t._id);
     }
   };
 
   const clear = () => {
+    cancelSearch();
+    resultId.current = searchId.current;
     setQuery('');
     setResults([]);
     setSearchedTerm('');
     setError('');
-    activeTerm.current = '';
+    setRowState({});
+    setSource('all');
     setLoading(false);
     inputRef.current?.focus();
   };
@@ -157,7 +250,7 @@ export function SearchPage({ notify, onDownloadAdded, initialQuery }) {
   const hasResults = results.length > 0;
 
   return (
-    <section className="search-page">
+    <section className="search-page" aria-label="Torrent search">
       <form
         className="searchbar"
         role="search"
@@ -172,10 +265,17 @@ export function SearchPage({ notify, onDownloadAdded, initialQuery }) {
             id="search-input"
             ref={inputRef}
             type="search"
+            aria-label="Search torrents"
             placeholder="Search torrents across public indexes..."
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            autoFocus
+            onChange={(e) => {
+              if (!e.target.value) return clear();
+              cancelSearch();
+              setLoading(false);
+              setError('');
+              setQuery(e.target.value);
+            }}
+            autoFocus={isActive}
             autoComplete="off"
             spellCheck="false"
           />
@@ -193,11 +293,11 @@ export function SearchPage({ notify, onDownloadAdded, initialQuery }) {
         </button>
       </form>
 
-      {error && <div className="notice notice-error">{error}</div>}
+      {error && <div className="notice notice-error" role="alert">{error}</div>}
 
       {hasResults && (
         <div className="toolbar">
-          <span className="toolbar-summary">
+          <span className="toolbar-summary" role="status">
             {loading ? 'Searching…' : `${rows.length} result${rows.length === 1 ? '' : 's'} for “${searchedTerm}”`}
           </span>
           {sources.length > 1 && (
@@ -217,7 +317,7 @@ export function SearchPage({ notify, onDownloadAdded, initialQuery }) {
       )}
 
       {hasResults ? (
-        <div className={`table-wrap ${loading ? 'is-stale' : ''}`}>
+        <div className={`table-wrap ${loading ? 'is-stale' : ''}`} aria-busy={loading}>
           <table className="table results-table">
             <thead>
               <tr>
@@ -237,6 +337,7 @@ export function SearchPage({ notify, onDownloadAdded, initialQuery }) {
             <tbody>
               {rows.map((t) => {
                 const state = rowState[t._id];
+                const busy = ['adding', 'opening', 'copying'].includes(state);
                 return (
                   <tr key={t._id}>
                     <td className="col-name">
@@ -254,8 +355,9 @@ export function SearchPage({ notify, onDownloadAdded, initialQuery }) {
                       <div className="row-actions">
                         <button
                           className={`btn btn-sm ${state === 'added' ? 'btn-done' : 'btn-outline'}`}
-                          onClick={() => handleDownload(t)}
-                          disabled={state === 'adding' || state === 'added'}
+                          onClick={() => handleAction(t, 'adding')}
+                          disabled={busy || state === 'added'}
+                          aria-label={`${state === 'added' ? 'Added' : 'Download'} ${t.title}`}
                         >
                           {state === 'added' ? (
                             <>
@@ -269,10 +371,10 @@ export function SearchPage({ notify, onDownloadAdded, initialQuery }) {
                             </>
                           )}
                         </button>
-                        <button className="icon-btn" onClick={() => handleOpenMagnet(t)} title="Open magnet in desktop client" aria-label="Open magnet">
+                        <button className="icon-btn" disabled={busy} onClick={() => handleAction(t, 'opening')} title="Open magnet in desktop client" aria-label={`Open magnet for ${t.title}`}>
                           <Icon name="magnet" />
                         </button>
-                        <button className="icon-btn" onClick={() => handleCopyMagnet(t)} title="Copy magnet link" aria-label="Copy magnet link">
+                        <button className="icon-btn" disabled={busy} onClick={() => handleAction(t, 'copying')} title="Copy magnet link" aria-label={`Copy magnet link for ${t.title}`}>
                           <Icon name="copy" />
                         </button>
                         {t.link ? (
@@ -292,14 +394,13 @@ export function SearchPage({ notify, onDownloadAdded, initialQuery }) {
           {rows.length === 0 && <p className="empty">No results match the current source filter.</p>}
         </div>
       ) : loading ? (
-        <p className="empty">Searching verified public torrent indexers…</p>
-      ) : searchedTerm && query.trim() ? (
-        <p className="empty">Nothing found for “{searchedTerm}”. Try fewer or different keywords.</p>
+        <p className="empty" role="status">Searching public torrent indexes…</p>
+      ) : !error && searchedTerm && query.trim() ? (
+        <p className="empty" role="status">Nothing found for “{searchedTerm}”. Try fewer or different keywords.</p>
       ) : (
         !error && (
           <p className="empty">
-            Search results from verified public indexers show up here. Downloads save to{' '}
-            <span className="mono">~/Downloads/Svorrent</span>.
+            Search public torrent indexes by name. Choose a result to download or copy its magnet link.
           </p>
         )
       )}
