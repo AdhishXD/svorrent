@@ -15,3 +15,6 @@ CMakeCache.txt
 cmake_install.cmake
 dist-app/
 *.dmg
+dist-win/
+*.exe
+scripts/cache/

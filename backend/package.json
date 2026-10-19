@@ -9,6 +9,7 @@
   "scripts": {
     "start": "node --openssl-legacy-provider server.js",
     "build:dmg": "../scripts/build-dmg.sh",
+    "build:win": "../scripts/build-windows.sh",
     "build:tether": "make -C tether",
     "setup:tether": "sudo ./scripts/install-tetherd.sh",
     "uninstall:tether": "sudo ./scripts/uninstall-tetherd.sh"
