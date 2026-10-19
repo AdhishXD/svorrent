@@ -1721,7 +1721,8 @@ a {
   border-radius: 8px;
   width: 100%;
   max-width: 1200px;
-  max-height: 92vh;
+  height: calc(100dvh - 40px);
+  max-height: calc(100dvh - 40px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1772,10 +1773,31 @@ a {
 .swarm-modal-body {
   padding: 16px 20px 24px 20px;
   overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   gap: 16px;
-  flex: 1;
+  flex: 1 1 0%;
+  min-height: 0;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.swarm-modal-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.swarm-modal-body::-webkit-scrollbar-track {
+  background: var(--surface);
+}
+
+.swarm-modal-body::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 4px;
+}
+
+.swarm-modal-body::-webkit-scrollbar-thumb:hover {
+  background: var(--text-3);
 }
 
 .swarm-modal-toolbar {
@@ -1793,6 +1815,7 @@ a {
   grid-template-columns: 1fr 320px;
   gap: 14px;
   align-items: stretch;
+  flex-shrink: 0;
 }
 
 @media (max-width: 960px) {
@@ -1893,7 +1916,7 @@ a {
   position: relative;
   width: 100%;
   background: #0b0e13;
-  min-height: 380px;
+  min-height: 320px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1902,7 +1925,7 @@ a {
 .swarm-map-svg {
   width: 100%;
   height: auto;
-  max-height: 490px;
+  max-height: 420px;
   display: block;
 }
 
@@ -2034,7 +2057,7 @@ a {
   border-radius: var(--radius);
   display: flex;
   flex-direction: column;
-  max-height: 520px;
+  max-height: 460px;
 }
 
 .countries-list {
@@ -2125,6 +2148,7 @@ a {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 .section-head {
@@ -2435,6 +2459,7 @@ a {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  flex-shrink: 0;
 }
 
 .telemetry-card {
