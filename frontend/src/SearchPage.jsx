@@ -292,13 +292,13 @@ export function SearchPage({ notify, onDownloadAdded, initialQuery }) {
           {rows.length === 0 && <p className="empty">No results match the current source filter.</p>}
         </div>
       ) : loading ? (
-        <p className="empty">Searching The Pirate Bay, LimeTorrents and TorrentProject…</p>
+        <p className="empty">Searching verified public torrent indexers…</p>
       ) : searchedTerm && query.trim() ? (
         <p className="empty">Nothing found for “{searchedTerm}”. Try fewer or different keywords.</p>
       ) : (
         !error && (
           <p className="empty">
-            Results from The Pirate Bay, LimeTorrents and TorrentProject show up here. Downloads save to{' '}
+            Search results from verified public indexers show up here. Downloads save to{' '}
             <span className="mono">~/Downloads/Svorrent</span>.
           </p>
         )
