@@ -100,3 +100,10 @@ export function formatDate(ms) {
   }
   return d.toLocaleDateString([], { month: 'short', day: 'numeric', year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined });
 }
+
+export function formatPeerAddress(ip, port) {
+  if (!ip) return '—';
+  const str = String(ip).trim();
+  const formattedIp = str.includes(':') && !str.startsWith('[') ? `[${str}]` : str;
+  return port ? `${formattedIp}:${port}` : formattedIp;
+}

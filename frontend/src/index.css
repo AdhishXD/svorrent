@@ -2210,23 +2210,117 @@ a {
   overflow-x: auto;
 }
 
+/* Swarm Peers Table layout & containment */
+.swarm-peers-table {
+  min-width: 980px;
+}
+
+.swarm-peers-table th,
+.swarm-peers-table td {
+  overflow: hidden;
+}
+
+.swarm-peers-table .col-country {
+  width: 170px;
+}
+
+.swarm-peers-table .col-peer-ip {
+  width: 220px;
+}
+
+.swarm-peers-table .col-client {
+  width: 140px;
+}
+
+.swarm-peers-table .col-proto {
+  width: 72px;
+  text-align: center;
+}
+
+.swarm-peers-table .col-iface {
+  width: 82px;
+  text-align: center;
+}
+
+.swarm-peers-table .col-down {
+  width: 88px;
+}
+
+.swarm-peers-table .col-up {
+  width: 80px;
+}
+
+.swarm-peers-table .col-progress {
+  width: 108px;
+}
+
+.swarm-peers-table .col-flags {
+  width: 50px;
+  text-align: right;
+}
+
 .country-cell {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .table-flag {
   font-size: 14px;
   line-height: 1;
+  flex-shrink: 0;
 }
 
 .table-country-name {
   font-weight: 500;
+  min-width: 0;
 }
 
 .table-city {
   font-size: 11.5px;
+  min-width: 0;
+}
+
+.peer-ip-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 12px;
+  min-width: 0;
+}
+
+.peer-addr-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Torrent Details Drawer Peers Table */
+.torrent-details-peers-table {
+  min-width: 480px;
+}
+
+.torrent-details-peers-table th,
+.torrent-details-peers-table td {
+  overflow: hidden;
+}
+
+.torrent-details-peers-table .col-addr {
+  width: 170px;
+}
+
+.torrent-details-peers-table .col-client {
+  width: 100px;
+}
+
+.torrent-details-peers-table .col-adapter {
+  width: 65px;
 }
 
 .channel-badge {

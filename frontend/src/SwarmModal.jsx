@@ -3,7 +3,7 @@ import { useDialog } from './useDialog';
 import { SwarmWorldMap } from './SwarmWorldMap';
 import { countryFlag, countryName } from './countryUtils';
 import { Icon } from './Icon';
-import { apiGet, formatSpeed, formatBytes } from './lib';
+import { apiGet, formatSpeed, formatBytes, formatPeerAddress } from './lib';
 
 // Color map for network interface badges
 const INTERFACE_COLORS = {
@@ -496,18 +496,18 @@ export function SwarmModal({ torrent, onClose }) {
             </div>
 
             <div className="table-responsive">
-              <table className="table table-compact">
+              <table className="table table-compact swarm-peers-table">
                 <thead>
                   <tr>
-                    <th>Country</th>
-                    <th>IP Address : Port</th>
-                    <th>Client Software</th>
-                    <th>Protocol</th>
-                    <th>Interface</th>
-                    <th className="col-num">Down Speed</th>
-                    <th className="col-num">Up Speed</th>
-                    <th className="col-num">Swarm Progress</th>
-                    <th className="col-num" title="C = Choking us, U = Unchoked, I = Interested">Flags</th>
+                    <th className="col-country">Country</th>
+                    <th className="col-peer-ip">IP Address : Port</th>
+                    <th className="col-client">Client Software</th>
+                    <th className="col-proto">Protocol</th>
+                    <th className="col-iface">Interface</th>
+                    <th className="col-down col-num">Down Speed</th>
+                    <th className="col-up col-num">Up Speed</th>
+                    <th className="col-progress col-num">Swarm Progress</th>
+                    <th className="col-flags col-num" title="C = Choking us, U = Unchoked, I = Interested">Flags</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -522,35 +522,39 @@ export function SwarmModal({ torrent, onClose }) {
                       const cCode = p.geo?.countryCode;
                       const isTether = p.networkDevice === 'feth0' || p.networkType === 'cellular';
                       const proto = p.protocol || 'TCP';
+                      const addrText = formatPeerAddress(p.ip, p.port);
+                      const cName = countryName(cCode);
                       return (
                         <tr key={`${p.ip}:${p.port}-${idx}`}>
-                          <td className="country-cell">
-                            <span className="table-flag">{countryFlag(cCode)}</span>
-                            <span className="table-country-name">{countryName(cCode)}</span>
-                            {p.geo?.city && <span className="table-city muted">({p.geo.city})</span>}
+                          <td className="col-country">
+                            <div className="country-cell" title={`${cName}${p.geo?.city ? ` (${p.geo.city})` : ''}`}>
+                              <span className="table-flag">{countryFlag(cCode)}</span>
+                              <span className="table-country-name ellipsis">{cName}</span>
+                              {p.geo?.city && <span className="table-city muted ellipsis">({p.geo.city})</span>}
+                            </div>
                           </td>
 
-                          <td className="mono">
-                            {p.ip}:{p.port}
+                          <td className="col-peer-ip mono" title={addrText}>
+                            <span className="peer-ip-text">{addrText}</span>
                           </td>
 
-                          <td className="ellipsis" title={p.client}>
-                            {p.client || 'Unknown'}
+                          <td className="col-client" title={p.client || 'Unknown'}>
+                            <span className="ellipsis">{p.client || 'Unknown'}</span>
                           </td>
 
-                          <td>
+                          <td className="col-proto">
                             <span className={`protocol-badge ${proto === 'uTP' ? 'badge-utp' : 'badge-tcp'}`}>
                               {proto}
                             </span>
                           </td>
 
-                          <td>
+                          <td className="col-iface">
                             <span className={`channel-badge ${isTether ? 'badge-tether' : 'badge-wifi'}`}>
                               {p.networkInterface || p.networkDevice || 'Unknown'}
                             </span>
                           </td>
 
-                          <td className="col-num mono">
+                          <td className="col-down col-num mono">
                             {p.downloadSpeed > 0 ? (
                               <span className="active-down">{formatSpeed(p.downloadSpeed)}</span>
                             ) : (
@@ -558,11 +562,11 @@ export function SwarmModal({ torrent, onClose }) {
                             )}
                           </td>
 
-                          <td className="col-num mono muted">
+                          <td className="col-up col-num mono muted">
                             {formatSpeed(p.uploadSpeed)}
                           </td>
 
-                          <td className="col-num mono">
+                          <td className="col-progress col-num mono">
                             <div className="table-progress-wrap">
                               <div className="table-progress-bar">
                                 <div className="table-progress-fill" style={{ width: `${p.progress || 0}%` }} />
@@ -571,7 +575,7 @@ export function SwarmModal({ torrent, onClose }) {
                             </div>
                           </td>
 
-                          <td className="col-num mono text-xs muted">
+                          <td className="col-flags col-num mono text-xs muted">
                             <span className={p.choked ? 'flag-choked' : 'flag-unchoked'} title={p.choked ? 'Peer is choking us' : 'Peer is unchoked'}>
                               {p.choked ? 'C' : 'U'}
                             </span>

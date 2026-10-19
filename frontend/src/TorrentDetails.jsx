@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Icon } from './Icon';
-import { apiGet, formatBytes, formatSpeed } from './lib';
+import { apiGet, formatBytes, formatSpeed, formatPeerAddress } from './lib';
 import { countryFlag, countryName } from './countryUtils';
 import { useDialog } from './useDialog';
 
@@ -167,12 +167,12 @@ function DetailsInner({ torrentId, onClose, onReveal }) {
           (peers.length === 0 ? (
             <p className="empty">No peers connected.</p>
           ) : (
-            <table className="table table-compact">
+            <table className="table table-compact torrent-details-peers-table">
               <thead>
                 <tr>
-                  <th>Address</th>
-                  <th>Client</th>
-                  <th>Adapter</th>
+                  <th className="col-addr">Address</th>
+                  <th className="col-client">Client</th>
+                  <th className="col-adapter">Adapter</th>
                   <th className="col-num">Down</th>
                   <th className="col-num">Up</th>
                   <th className="col-num">Has</th>
@@ -180,26 +180,33 @@ function DetailsInner({ torrentId, onClose, onReveal }) {
                 </tr>
               </thead>
               <tbody>
-                {peers.map((p, i) => (
-                  <tr key={i}>
-                    <td className="mono">
-                      <span className="table-flag" title={countryName(p.geo?.countryCode)} style={{ marginRight: '6px', fontSize: '13px' }}>
-                        {countryFlag(p.geo?.countryCode)}
-                      </span>
-                      {String(p.ip)}:{String(p.port)}
-                      {p.type && <span className="muted"> · {String(p.type)}</span>}
-                    </td>
-                    <td className="ellipsis" title={p.client}>{p.client || 'Unknown'}</td>
-                    <td className="mono muted">{p.networkDevice || 'default'}</td>
-                    <td className="col-num mono">{formatSpeed(p.downloadSpeed)}</td>
-                    <td className="col-num mono muted">{formatSpeed(p.uploadSpeed)}</td>
-                    <td className="col-num mono">{p.progress ?? 0}%</td>
-                    <td className="col-num mono muted">
-                      {p.choked ? 'C' : '·'}
-                      {p.interested ? 'I' : '·'}
-                    </td>
-                  </tr>
-                ))}
+                {peers.map((p, i) => {
+                  const addr = formatPeerAddress(p.ip, p.port);
+                  return (
+                    <tr key={i}>
+                      <td className="mono col-addr" title={addr}>
+                        <div className="peer-addr-wrap">
+                          <span className="table-flag" title={countryName(p.geo?.countryCode)} style={{ marginRight: '6px', fontSize: '13px', flexShrink: 0 }}>
+                            {countryFlag(p.geo?.countryCode)}
+                          </span>
+                          <span className="peer-ip-text ellipsis">{addr}</span>
+                          {p.type && <span className="muted" style={{ flexShrink: 0 }}> · {String(p.type)}</span>}
+                        </div>
+                      </td>
+                      <td className="col-client" title={p.client || 'Unknown'}>
+                        <span className="ellipsis">{p.client || 'Unknown'}</span>
+                      </td>
+                      <td className="mono muted col-adapter">{p.networkDevice || 'default'}</td>
+                      <td className="col-num mono">{formatSpeed(p.downloadSpeed)}</td>
+                      <td className="col-num mono muted">{formatSpeed(p.uploadSpeed)}</td>
+                      <td className="col-num mono">{p.progress ?? 0}%</td>
+                      <td className="col-num mono muted">
+                        {p.choked ? 'C' : '·'}
+                        {p.interested ? 'I' : '·'}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           ))}
