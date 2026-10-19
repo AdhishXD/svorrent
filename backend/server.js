@@ -9,7 +9,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 import net from 'node:net';
 import dgram from 'node:dgram';
-import { spawn, exec } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
 import TorrentSearchApi from 'torrent-search-api';
 import WebTorrent from 'webtorrent';
 import Wire from 'bittorrent-protocol';
@@ -20,6 +20,7 @@ import { NetworkManager } from './lib/networks.js';
 import { TorrentArchive } from './lib/archive.js';
 import { FolderScanner } from './lib/scanner.js';
 import { resolveDoH } from './lib/doh.js';
+import { cleanMagnet, extractInfoHash, waitForInfoHash, setTorrentPaused } from './lib/torrents.js';
 import geoip from 'geoip-lite';
 import {
   assessTorrentPlayability,
@@ -198,7 +199,10 @@ const folderScanner = new FolderScanner(DOWNLOAD_DIR, () => client, () => archiv
 // ---------------------------------------------------------------------------
 
 const session = createSession(DATA_DIR);
+let shuttingDown = false;
+let restoringSession = true;
 const saveSession = () => {
+  if (shuttingDown || restoringSession) return;
   session.save(client.torrents);
   if (client.torrents) {
     for (const t of client.torrents) {
@@ -211,20 +215,20 @@ const saveSession = () => {
 
 let saveSessionTimer = null;
 const scheduleSaveSession = (delay = 2000) => {
-  if (saveSessionTimer) return;
+  if (shuttingDown || saveSessionTimer) return;
   saveSessionTimer = setTimeout(() => {
     saveSessionTimer = null;
     saveSession();
   }, delay);
 };
 
-setInterval(() => {
+const sessionInterval = setInterval(() => {
   saveSession();
 }, 5 * 1000).unref();
 
 async function restoreSession() {
   let entries = session.load();
-  if (!entries || !entries.length) {
+  if (entries === null) {
     const archived = archive.getAll();
     if (archived && archived.length > 0) {
       console.log(`[session] Restoring ${archived.length} torrent(s) from persistent archive...`);
@@ -235,6 +239,7 @@ async function restoreSession() {
         path: a.path || DOWNLOAD_DIR,
         paused: false,
         addedAt: a.savedAt,
+        torrentFile: archive.get(a.infoHash)?.torrentBuffer?.toString('base64'),
       }));
     }
   }
@@ -242,6 +247,7 @@ async function restoreSession() {
   console.log(`[session] Restoring ${entries.length} torrent(s) from persistent state...`);
 
   for (const entry of entries) {
+    if (shuttingDown) break;
     try {
       const source = entry.torrentFile
         ? Buffer.from(entry.torrentFile, 'base64')
@@ -251,6 +257,7 @@ async function restoreSession() {
 
       const addOpts = {
         path: entry.path || DOWNLOAD_DIR,
+        paused: !!entry.paused,
       };
       if (entry.bitfield) {
         try {
@@ -258,6 +265,7 @@ async function restoreSession() {
         } catch {}
       }
 
+      if (await client.get(source)) continue;
       const torrent = client.add(source, addOpts);
       if (torrent) {
         torrent._isPermanentDownload = true;
@@ -265,7 +273,6 @@ async function restoreSession() {
         if (entry.bitfield) torrent._savedBitfield = entry.bitfield;
         if (entry.torrentFile) torrent._savedTorrentFile = entry.torrentFile;
         if (entry.paused) {
-          torrent.paused = true;
           torrent._pausedManually = true;
         }
         setupTorrentHooks(torrent);
@@ -281,12 +288,20 @@ process.on('uncaughtException', (err) => console.error('Uncaught Exception:', er
 process.on('unhandledRejection', (reason) => console.error('Unhandled Rejection:', reason));
 
 async function shutdownCleanup() {
+  if (shuttingDown) return;
   console.log('\nSvorrent shutting down — saving session state...');
   saveSession();
+  shuttingDown = true;
+  clearInterval(sessionInterval);
+  clearTimeout(saveSessionTimer);
+  networkManager.destroy();
+  httpServer.close();
+  const deadline = setTimeout(() => process.exit(1), 10000);
+  deadline.unref();
   try {
     await new Promise((resolve) => client.destroy(resolve));
   } catch {}
-  process.exit(0);
+  process.exit(process.exitCode || 0);
 }
 process.on('SIGINT', shutdownCleanup);
 process.on('SIGTERM', shutdownCleanup);
@@ -302,30 +317,8 @@ TorrentSearchApi.enableProvider('ThePirateBay');
 // Helpers
 // ---------------------------------------------------------------------------
 
-function cleanMagnet(uri) {
-  if (!uri) return '';
-  let str = decodeURIComponent(String(uri));
-  const m = str.match(/btih:([a-fA-F0-9]{40,42}|[a-zA-Z2-7]{32})/i);
-  if (m) {
-    let hash = m[1].toLowerCase();
-    if (hash.length === 42 && hash.startsWith('3a')) hash = hash.slice(2);
-    str = str.replace(/btih:[a-fA-F0-9]{40,42}/i, 'btih:' + hash);
-    if (!str.startsWith('magnet:?')) {
-      str = 'magnet:?' + str.replace(/^magnet:?\/?\/?\??/, '');
-    }
-  }
-  return str;
-}
-
-function extractInfoHash(uri) {
-  if (!uri) return null;
-  const cleaned = cleanMagnet(uri);
-  const m = cleaned.match(/btih:([a-fA-F0-9]{40}|[a-zA-Z2-7]{32})/i);
-  return m ? m[1].toLowerCase() : null;
-}
-
 function enrichMagnetWithTrackers(magnetURI) {
-  if (!magnetURI || !magnetURI.startsWith('magnet:?')) return magnetURI;
+  if (typeof magnetURI !== 'string' || !magnetURI.startsWith('magnet:?')) return magnetURI;
   const existing = new Set();
   for (const match of magnetURI.matchAll(/(?:^|&)tr=([^&]*)/g)) {
     try {
@@ -351,6 +344,11 @@ function setupTorrentHooks(torrent) {
 
   // Fast Ramp-Up: immediately unchoke and signal interest on connection
   torrent.on('wire', (wire) => {
+    networkManager.trackWire(torrent, wire);
+    if (torrent._pausedManually || torrent.paused) {
+      wire.destroy();
+      return;
+    }
     try {
       if (typeof wire.unchoke === 'function') wire.unchoke();
       if (typeof wire.interested === 'function') wire.interested();
@@ -360,6 +358,11 @@ function setupTorrentHooks(torrent) {
   torrent.once('ready', () => {
     // Sequential Strategy: commits pieces to disk and bitfield in order so restarts/failures resume seamlessly
     torrent.strategy = 'sequential';
+    if (torrent._pausedManually || torrent.paused) {
+      setTorrentPaused(torrent, true);
+      saveSession();
+      return;
+    }
     if (torrent.pieces && torrent.pieces.length > 0) {
       torrent.select(0, torrent.pieces.length - 1);
       if (typeof torrent.critical === 'function') {
@@ -394,7 +397,17 @@ function setupTorrentHooks(torrent) {
   });
 }
 
-async function getOrAddTorrent(magnetURI, opts = {}) {
+let addQueue = Promise.resolve();
+function getOrAddTorrent(source, opts = {}) {
+  // Serialise lookup + initialization: infoHash is assigned asynchronously,
+  // so concurrent requests could otherwise create a doomed duplicate torrent.
+  const pending = addQueue.then(() => addTorrent(source, opts));
+  addQueue = pending.catch(() => {});
+  return pending;
+}
+
+async function addTorrent(magnetURI, opts = {}) {
+  if (shuttingDown) throw new Error('Server is shutting down');
   magnetURI = cleanMagnet(magnetURI);
   const targetInfoHash = extractInfoHash(magnetURI);
   magnetURI = enrichMagnetWithTrackers(magnetURI);
@@ -408,7 +421,7 @@ async function getOrAddTorrent(magnetURI, opts = {}) {
       addOpts.bitfield = opts.bitfield;
     } else if (targetInfoHash) {
       try {
-        const savedEntries = session.load();
+        const savedEntries = session.load() || [];
         const existing = savedEntries.find((e) => e.infoHash?.toLowerCase() === targetInfoHash.toLowerCase());
         if (existing?.bitfield) {
           addOpts.bitfield = Buffer.from(existing.bitfield, 'base64');
@@ -434,11 +447,15 @@ async function getOrAddTorrent(magnetURI, opts = {}) {
         torrent._savedBitfield = Buffer.isBuffer(addOpts.bitfield) ? addOpts.bitfield.toString('base64') : addOpts.bitfield;
       }
       setupTorrentHooks(torrent);
+      await waitForInfoHash(torrent);
     }
   } else {
     torrent._isPermanentDownload = true;
     setupTorrentHooks(torrent);
   }
+  if (!torrent) throw new Error('Failed to add torrent');
+  saveSession();
+  folderScanner.invalidateCache();
   return torrent;
 }
 
@@ -865,7 +882,7 @@ app.get('/api/swarm', (req, res) => {
       availability.push(numWires > 0 ? Math.min(100, Math.round((peersWithPiece / numWires) * 100)) : 0);
     }
 
-    let streamingCursor = 0;
+    let streamingCursor = totalPieces;
     for (let i = 0; i < totalPieces; i++) {
       if (!targetTorrent.bitfield.get(i)) {
         streamingCursor = i;
@@ -902,21 +919,7 @@ app.post('/api/torrent/:id/pause', async (req, res) => {
   const torrent = await client.get(req.params.id);
   if (!torrent) return res.status(404).json({ error: 'Torrent not found' });
 
-  torrent.paused = true;
-  torrent._pausedManually = true;
-
-  try {
-    if (torrent.pieces && torrent.pieces.length > 0) {
-      torrent.deselect(0, torrent.pieces.length - 1, false);
-    }
-  } catch {}
-
-  if (torrent.wires) {
-    torrent.wires.forEach((wire) => {
-      try { wire.choke(); } catch {}
-      try { wire.uninterested(); } catch {}
-    });
-  }
+  setTorrentPaused(torrent, true);
 
   saveSession();
   res.json({ success: true, paused: true });
@@ -927,22 +930,7 @@ app.post('/api/torrent/:id/resume', async (req, res) => {
   const torrent = await client.get(req.params.id);
   if (!torrent) return res.status(404).json({ error: 'Torrent not found' });
 
-  torrent.paused = false;
-  torrent._pausedManually = false;
-
-  try {
-    if (torrent.pieces && torrent.pieces.length > 0) {
-      torrent.select(0, torrent.pieces.length - 1, false);
-    }
-  } catch {}
-
-  if (torrent.wires) {
-    torrent.wires.forEach((wire) => {
-      try { wire.unchoke(); } catch {}
-      try { wire.interested(); } catch {}
-    });
-  }
-  try { torrent._drain(); } catch {}
+  setTorrentPaused(torrent, false);
 
   saveSession();
   res.json({ success: true, paused: false });
@@ -1008,7 +996,10 @@ app.post('/api/torrent/:id/open-finder', async (req, res) => {
     }
   }
 
+  let openSettled = false;
   const onOpen = (err) => {
+    if (openSettled) return;
+    openSettled = true;
     if (err) return res.status(500).json({ error: err.message });
     res.json({ success: true, path: targetFile || basePath });
   };
@@ -1018,12 +1009,12 @@ app.post('/api/torrent/:id/open-finder', async (req, res) => {
       if (code !== 0) return onOpen(new Error('Finder could not open the download location'));
       onOpen(null);
     });
+  if (process.platform === 'win32') {
+    const explorerArgs = targetFile ? [`/select,${targetFile}`] : [basePath];
+    return execFile('explorer.exe', explorerArgs, onOpen);
   }
 
-  const cmd = process.platform === 'win32'
-    ? `explorer.exe "${basePath}"`
-    : `xdg-open "${basePath}"`;
-  exec(cmd, onOpen);
+  execFile('xdg-open', [basePath], onOpen);
 });
 
 // 10. Play Video in VLC / Default Media Player
@@ -1130,8 +1121,7 @@ app.post('/api/folder-files/resume', async (req, res) => {
     }
 
     torrent._isPermanentDownload = true;
-    torrent.paused = false;
-    torrent._pausedManually = false;
+    setTorrentPaused(torrent, false);
 
     // Trigger local files verification if already ready
     if (torrent.ready && typeof torrent.rescanFiles === 'function') {
@@ -1158,7 +1148,7 @@ app.post('/api/folder-files/delete', (req, res) => {
     const result = folderScanner.deleteItem(name);
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -1185,8 +1175,14 @@ app.post('/api/torrent/:id/recheck', async (req, res) => {
 // ---------------------------------------------------------------------------
 // Static Web App Serving
 // ---------------------------------------------------------------------------
-const frontendDist = path.resolve(__dirname, '../frontend/dist');
-if (fs.existsSync(frontendDist)) {
+const frontendDistCandidates = [
+  path.resolve(__dirname, '../frontend/dist'),
+  path.resolve(__dirname, 'frontend/dist'),
+  path.resolve(__dirname, '../dist'),
+  path.resolve(__dirname, './dist')
+];
+const frontendDist = frontendDistCandidates.find((d) => fs.existsSync(d));
+if (frontendDist) {
   app.use(express.static(frontendDist));
   app.use((req, res, next) => {
     if (req.method === 'GET' && !req.path.startsWith('/api')) {
@@ -1200,8 +1196,16 @@ if (fs.existsSync(frontendDist)) {
 // Server Initialization
 // ---------------------------------------------------------------------------
 
-app.listen(port, () => {
+const httpServer = app.listen(port, () => {
   console.log(`Svorrent API running on http://localhost:${port}`);
   console.log(`Native downloads directory: ${DOWNLOAD_DIR}`);
-  restoreSession().catch((err) => console.error('[session] restore error:', err.message));
+  restoreSession().catch((err) => console.error('[session] restore error:', err.message)).finally(() => {
+    restoringSession = false;
+    saveSession();
+  });
+});
+httpServer.on('error', (err) => {
+  console.error('[server] HTTP listener failed:', err.message);
+  process.exitCode = 1;
+  shutdownCleanup();
 });

@@ -6,11 +6,11 @@
 #include <stdbool.h>
 #include "include/tetherkit_c.h"
 
-static volatile bool g_running = true;
+static volatile sig_atomic_t g_running = 1;
 
 static void handle_signal(int sig) {
     (void)sig;
-    g_running = false;
+    g_running = 0;
 }
 
 int main(int argc, char** argv) {
@@ -25,10 +25,19 @@ int main(int argc, char** argv) {
             tk_error_t err;
             memset(&err, 0, sizeof(err));
             tk_result_t res = tk_list_devices(devices, 8, &count, false, &err);
-            if (res == TK_OK && count > 0) {
+            if (res != TK_OK) {
+                fprintf(stderr, "[svorrent-tetherd] Failed to list devices: %s\n", err.message);
+                return 1;
+            }
+            if (count > 0) {
                 printf("RNDIS devices found: %zu\n", count);
-                for (size_t d = 0; d < count; ++d) {
+                const size_t capacity = sizeof(devices) / sizeof(devices[0]);
+                const size_t listed = count < capacity ? count : capacity;
+                for (size_t d = 0; d < listed; ++d) {
                     printf("[%zu] %04x:%04x - %s\n", d, devices[d].vendor_id, devices[d].product_id, devices[d].description);
+                }
+                if (count > listed) {
+                    printf("Showing first %zu devices.\n", listed);
                 }
             } else {
                 printf("No RNDIS devices found.\n");
@@ -59,6 +68,8 @@ int main(int argc, char** argv) {
 
     tk_session_t* session = NULL;
     char active_interface[TK_INTERFACE_NAME_CAPACITY] = {0};
+    bool once_connected = false;
+    bool enumeration_failed = false;
 
     while (g_running) {
         tk_device_info_t devices[4];
@@ -67,6 +78,13 @@ int main(int argc, char** argv) {
         memset(&err, 0, sizeof(err));
 
         tk_result_t res = tk_list_devices(devices, 4, &count, false, &err);
+        if (!g_running) break;
+        // A failed scan is not evidence that an active device disconnected.
+        // Report an error once per failure streak to avoid filling launchd logs.
+        if (res != TK_OK && !enumeration_failed) {
+            fprintf(stderr, "[svorrent-tetherd] Failed to scan devices: %s\n", err.message);
+        }
+        enumeration_failed = (res != TK_OK);
         bool has_device = (res == TK_OK && count > 0);
 
         if (has_device && session == NULL) {
@@ -100,10 +118,12 @@ int main(int argc, char** argv) {
             bool connected = false;
             for (int attempt = 0; attempt < 25 && g_running; ++attempt) {
                 usleep(200000); // 200ms
+                if (!g_running) break;
                 tk_session_status_t status;
                 if (tk_session_status_get(session, &status) == TK_OK) {
                     if (status.run_state == TK_RUN_RUNNING) {
                         strncpy(active_interface, status.system_interface, sizeof(active_interface) - 1);
+                        active_interface[sizeof(active_interface) - 1] = '\0';
                         printf("[svorrent-tetherd] Virtual interface %s is UP. Requesting DHCP lease...\n",
                                active_interface);
 
@@ -115,12 +135,13 @@ int main(int argc, char** argv) {
                         tk_error_t ip_err;
                         memset(&ip_err, 0, sizeof(ip_err));
                         if (tk_net_apply(active_interface, &ip_config, &ip_err) == TK_OK) {
-                            printf("[svorrent-tetherd] DHCP lease successfully acquired on %s! Ready for bonding.\n",
+                            printf("[svorrent-tetherd] DHCP configuration submitted on %s; awaiting an address.\n",
                                    active_interface);
                         } else {
                             fprintf(stderr, "[svorrent-tetherd] DHCP configuration warning: %s\n", ip_err.message);
                         }
                         connected = true;
+                        once_connected = true;
                         break;
                     } else if (status.run_state == TK_RUN_FAILED) {
                         fprintf(stderr, "[svorrent-tetherd] Session failed: %s\n", status.fatal);
@@ -130,7 +151,9 @@ int main(int argc, char** argv) {
             }
 
             if (!connected && session) {
-                fprintf(stderr, "[svorrent-tetherd] Session connection timed out.\n");
+                if (g_running) {
+                    fprintf(stderr, "[svorrent-tetherd] Session did not become ready.\n");
+                }
                 tk_session_stop(session);
                 tk_session_destroy(session);
                 session = NULL;
@@ -147,7 +170,7 @@ int main(int argc, char** argv) {
                 }
             }
 
-            if (!has_device) {
+            if (session != NULL && res == TK_OK && !has_device) {
                 printf("[svorrent-tetherd] Device disconnected. Tearing down session...\n");
                 tk_session_stop(session);
                 tk_session_destroy(session);
@@ -156,11 +179,9 @@ int main(int argc, char** argv) {
             }
         }
 
-        if (once_mode && session != NULL) {
-            // Once mode connected, keep holding until signal
-            while (g_running) {
-                sleep(1);
-            }
+        // Keep monitoring the first connection in --once mode, but do not
+        // reconnect after it ends. Signals still perform normal cleanup.
+        if (once_mode && once_connected && session == NULL) {
             break;
         }
 

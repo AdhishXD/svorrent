@@ -16,18 +16,18 @@ export function createSession(dataDir) {
   const load = () => {
     try {
       const entries = JSON.parse(fs.readFileSync(file, 'utf8'));
-      return Array.isArray(entries) ? entries : [];
+      return Array.isArray(entries) ? entries.filter((entry) => entry && typeof entry === 'object') : null;
     } catch {
-      return [];
+      return null;
     }
   };
 
   const save = (torrents) => {
     const existingMap = new Map();
     try {
-      const currentOnDisk = load();
+      const currentOnDisk = load() || [];
       for (const e of currentOnDisk) {
-        if (e.infoHash) existingMap.set(e.infoHash.toLowerCase(), e);
+        if (typeof e.infoHash === 'string') existingMap.set(e.infoHash.toLowerCase(), e);
       }
     } catch {}
 

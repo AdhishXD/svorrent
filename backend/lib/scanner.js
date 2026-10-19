@@ -14,6 +14,7 @@ function getDirectorySize(dirPath) {
     const entries = fs.readdirSync(dirPath, { withFileTypes: true });
     for (const entry of entries) {
       if (IGNORED_FILES.has(entry.name.toLowerCase())) continue;
+      if (!entry.isFile() && !entry.isDirectory()) continue;
       const fullPath = path.join(dirPath, entry.name);
       try {
         if (entry.isDirectory()) {
@@ -116,12 +117,13 @@ export class FolderScanner {
 
       // 1. Check if active in client
       const activeMatch = activeTorrents.find((t) => {
+        if (path.resolve(t.path || this.downloadDir) !== path.resolve(this.downloadDir)) return false;
         if (t.name && t.name.toLowerCase() === entry.name.toLowerCase()) return true;
         if (Array.isArray(t.files)) {
           return t.files.some((f) => {
-            const fName = (f.name || '').toLowerCase();
             const fPath = (f.path || '').toLowerCase();
-            return fName === entry.name.toLowerCase() || fPath.startsWith(entry.name.toLowerCase());
+            const itemName = entry.name.toLowerCase();
+            return fPath === itemName || fPath.startsWith(`${itemName}/`);
           });
         }
         return false;
@@ -216,10 +218,16 @@ export class FolderScanner {
   }
 
   deleteItem(name) {
-    if (!name) throw new Error('File name is required');
-    const safeName = path.basename(name);
+    if (typeof name !== 'string' || !name || name === '.' || name === '..' ||
+        name.includes('/') || name.includes('\\') || name.includes('\0')) {
+      throw Object.assign(new Error('A single file or folder name is required'), { status: 400 });
+    }
+    const safeName = name;
     const target = path.join(this.downloadDir, safeName);
     if (!fs.existsSync(target)) throw new Error('File not found on disk');
+    if (this.scan(true).items.some((item) => item.name === name && item.status === 'active')) {
+      throw Object.assign(new Error('Remove the active torrent before deleting its files'), { status: 409 });
+    }
 
     fs.rmSync(target, { recursive: true, force: true });
     this.invalidateCache();

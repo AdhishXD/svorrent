@@ -7,10 +7,11 @@ import net from 'node:net';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { exec } from 'node:child_process';
+import { exec, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -75,6 +76,8 @@ export class NetworkManager {
     this.roundRobinIndex = 0;
     this.wireToInterface = new WeakMap();
     this.socketToInterface = new WeakMap();
+    this.wireToSocket = new WeakMap();
+    this.baseMaxConns = this.getClient()?.maxConns || 120;
     this.stats = new Map(); // id -> { downloaded: 0, uploaded: 0, currentDown: 0, currentUp: 0, peers: 0, history: [] }
     this.usbTetherDevice = { found: false, name: null };
     this.isTetherDaemonRunning = false;
@@ -100,7 +103,7 @@ export class NetworkManager {
   async checkUsbTether() {
     try {
       const tetherBin = getTetherDaemonBin();
-      const { stdout } = await execAsync(`"${tetherBin}" --list`);
+      const { stdout } = await execFileAsync(tetherBin, ['--list'], { timeout: 4000 });
       if (stdout.includes('RNDIS devices found:')) {
         let deviceName = 'Android Device';
         if (stdout.includes('04e8:')) deviceName = 'Samsung Galaxy';
@@ -146,9 +149,10 @@ export class NetworkManager {
 
   hookNetConnect() {
     const originalConnect = net.connect;
+    this.originalConnect = originalConnect;
     const self = this;
 
-    net.connect = function (...args) {
+    this.connectHook = net.connect = function (...args) {
       let opts = args[0];
       let cb = args[1];
       let chosen = null;
@@ -157,7 +161,7 @@ export class NetworkManager {
         const port = opts;
         const host = typeof args[1] === 'string' ? args[1] : 'localhost';
         cb = typeof args[1] === 'function' ? args[1] : args[2];
-        chosen = self.pickInterface();
+        chosen = net.isIPv4(host) && !host.startsWith('127.') ? self.pickInterface() : null;
         opts = { port, host };
         if (chosen && chosen.ip) {
           opts.localAddress = chosen.ip;
@@ -168,10 +172,13 @@ export class NetworkManager {
         }
         return socket;
       } else if (opts && typeof opts === 'object') {
-        if (opts.host && opts.port && !opts.localAddress) {
+        // Interfaces currently carry IPv4 addresses. Never bind IPv6, loopback,
+        // Unix sockets or hostname-based service requests to one of those.
+        if (!opts.path && opts.port && !opts.localAddress && net.isIPv4(opts.host) && !opts.host.startsWith('127.')) {
           chosen = self.pickInterface();
           if (chosen && chosen.ip) {
-            opts.localAddress = chosen.ip;
+            opts = { ...opts, localAddress: chosen.ip };
+            args[0] = opts;
           }
         }
         const socket = originalConnect.apply(this, args);
@@ -184,6 +191,22 @@ export class NetworkManager {
     };
   }
 
+  destroy() {
+    clearInterval(this.intervalId);
+    if (net.connect === this.connectHook) net.connect = this.originalConnect;
+  }
+
+  trackWire(torrent, wire) {
+    // WebTorrent keeps the socket on Peer, not on its protocol Wire.
+    const peer = Array.from(torrent._peers?.values() || []).find((entry) => entry.wire === wire);
+    if (peer?.conn) this.wireToSocket.set(wire, peer.conn);
+    const socket = peer?.conn || wire.conn;
+    if (!socket) return;
+    const iface = this.getAllInterfaces().find((entry) => entry.ip === socket.localAddress);
+    const id = iface?.id || this.socketToInterface.get(socket);
+    if (id) this.wireToInterface.set(wire, id);
+  }
+
   getAllInterfaces() {
     const ifaces = os.networkInterfaces();
     const list = [];
@@ -192,7 +215,7 @@ export class NetworkManager {
     for (const [device, addrs] of Object.entries(ifaces)) {
       if (!addrs) continue;
       for (const addr of addrs) {
-        if (addr.family === 'IPv4' && !addr.internal) {
+        if ((addr.family === 'IPv4' || addr.family === 4) && !addr.internal && !list.some((entry) => entry.id === device)) {
           let humanName = this.hardwarePorts.get(device);
           if (!humanName) {
             if (device.startsWith('feth')) {
@@ -238,7 +261,8 @@ export class NetworkManager {
     let best = null;
     let minPeers = Infinity;
 
-    for (const iface of available) {
+    for (let index = 0; index < available.length; index++) {
+      const iface = available[(this.roundRobinIndex + index) % available.length];
       const peerCount = this.stats.get(iface.id)?.peers ?? 0;
       if (peerCount < minPeers) {
         minPeers = peerCount;
@@ -246,10 +270,7 @@ export class NetworkManager {
       }
     }
 
-    if (!best) {
-      best = available[this.roundRobinIndex % available.length];
-      this.roundRobinIndex++;
-    }
+    this.roundRobinIndex = (available.indexOf(best) + 1) % available.length;
 
     return best;
   }
@@ -318,7 +339,7 @@ export class NetworkManager {
     // Dynamic swarm connection scaling (Plexo pattern):
     // Scales total maxConns based on the number of bonded interfaces
     if (availableActiveIds.length > 0 && typeof client.maxConns === 'number') {
-      const targetConns = Math.max(120, 60 * availableActiveIds.length);
+      const targetConns = Math.max(this.baseMaxConns, 60 * availableActiveIds.length);
       if (client.maxConns !== targetConns) {
         client.maxConns = targetConns;
       }
@@ -330,17 +351,19 @@ export class NetworkManager {
       for (const t of client.torrents) {
         if (!t.wires) continue;
         for (const wire of t.wires) {
+          if (wire.destroyed) continue;
           let ifaceId = null;
+          const socket = this.wireToSocket.get(wire) || wire.conn;
 
           // 1. Direct kernel localAddress match on active physical interface
-          if (wire.conn?.localAddress) {
-            const match = ifaces.find((i) => i.ip === wire.conn.localAddress && !this.disabledIds.has(i.id));
+          if (socket?.localAddress) {
+            const match = ifaces.find((i) => i.ip === socket.localAddress && !this.disabledIds.has(i.id));
             if (match) ifaceId = match.id;
           }
 
           // 2. Fall back to socket mapping registered at connect()
-          if (!ifaceId && wire.conn && this.socketToInterface.has(wire.conn)) {
-            const mapped = this.socketToInterface.get(wire.conn);
+          if (!ifaceId && socket && this.socketToInterface.has(socket)) {
+            const mapped = this.socketToInterface.get(socket);
             if (availableActiveIds.includes(mapped) && !this.disabledIds.has(mapped)) {
               ifaceId = mapped;
             }

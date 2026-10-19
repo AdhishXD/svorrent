@@ -6,6 +6,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+const isInfoHash = (value) => typeof value === 'string' && /^[a-f0-9]{40}$/i.test(value);
+
+function writeAtomic(file, content) {
+  const temporary = `${file}.tmp`;
+  fs.writeFileSync(temporary, content);
+  fs.renameSync(temporary, file);
+}
+
 export class TorrentArchive {
   constructor(dataDir) {
     this.archiveDir = path.join(dataDir, 'archive');
@@ -16,7 +24,7 @@ export class TorrentArchive {
 
   // Save torrent metadata & .torrent file into archive
   save(torrent) {
-    if (!torrent || !torrent.infoHash) return;
+    if (!torrent || !isInfoHash(torrent.infoHash)) return;
     const infoHash = torrent.infoHash.toLowerCase();
 
     const meta = {
@@ -37,7 +45,7 @@ export class TorrentArchive {
 
     const jsonPath = path.join(this.archiveDir, `${infoHash}.json`);
     try {
-      fs.writeFileSync(jsonPath, JSON.stringify(meta, null, 2));
+      writeAtomic(jsonPath, JSON.stringify(meta, null, 2));
     } catch (err) {
       console.warn(`[archive] Failed to save meta for ${infoHash}:`, err.message);
     }
@@ -45,7 +53,7 @@ export class TorrentArchive {
     if (torrent.torrentFile) {
       const torrentPath = path.join(this.archiveDir, `${infoHash}.torrent`);
       try {
-        fs.writeFileSync(torrentPath, torrent.torrentFile);
+        writeAtomic(torrentPath, torrent.torrentFile);
       } catch (err) {
         console.warn(`[archive] Failed to save .torrent file for ${infoHash}:`, err.message);
       }
@@ -62,7 +70,7 @@ export class TorrentArchive {
           try {
             const content = fs.readFileSync(path.join(this.archiveDir, file), 'utf8');
             const parsed = JSON.parse(content);
-            if (parsed && parsed.infoHash) {
+            if (isInfoHash(parsed?.infoHash) && file === `${parsed.infoHash.toLowerCase()}.json`) {
               const hasTorrentFile = fs.existsSync(path.join(this.archiveDir, `${parsed.infoHash}.torrent`));
               list.push({ ...parsed, hasTorrentFile });
             }
@@ -77,12 +85,13 @@ export class TorrentArchive {
 
   // Get specific archived record
   get(infoHash) {
-    if (!infoHash) return null;
+    if (!isInfoHash(infoHash)) return null;
     const jsonPath = path.join(this.archiveDir, `${infoHash.toLowerCase()}.json`);
     if (!fs.existsSync(jsonPath)) return null;
     try {
       const content = fs.readFileSync(jsonPath, 'utf8');
       const parsed = JSON.parse(content);
+      if (!isInfoHash(parsed?.infoHash) || parsed.infoHash.toLowerCase() !== infoHash.toLowerCase()) return null;
       const torrentPath = path.join(this.archiveDir, `${parsed.infoHash}.torrent`);
       let torrentBuffer = null;
       if (fs.existsSync(torrentPath)) {
@@ -122,7 +131,7 @@ export class TorrentArchive {
 
   // Remove archive record
   remove(infoHash) {
-    if (!infoHash) return;
+    if (!isInfoHash(infoHash)) return;
     const h = infoHash.toLowerCase();
     try { fs.unlinkSync(path.join(this.archiveDir, `${h}.json`)); } catch {}
     try { fs.unlinkSync(path.join(this.archiveDir, `${h}.torrent`)); } catch {}

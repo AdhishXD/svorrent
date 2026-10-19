@@ -10,6 +10,7 @@ export const VIDEO_EXTENSIONS = new Set([
 // Cache for probed video metadata: filePath -> { duration: seconds, bitrate: bits/s, probedAt: timestamp }
 const metaCache = new Map();
 const inFlightProbes = new Set();
+const probeAttempts = new Map();
 
 /**
  * Locate ffprobe binary on the host system.
@@ -17,7 +18,6 @@ const inFlightProbes = new Set();
 export function findFfprobe() {
   const candidates = [
     'ffprobe',
-    '/Users/soveet/miniforge3/bin/ffprobe',
     '/opt/homebrew/bin/ffprobe',
     '/usr/local/bin/ffprobe',
     '/usr/bin/ffprobe',
@@ -74,7 +74,10 @@ export function estimateDuration(fileLength) {
 export function probeMediaAsync(filePath) {
   if (!filePath || !fs.existsSync(filePath) || inFlightProbes.has(filePath)) return;
   if (metaCache.has(filePath)) return;
+  if (inFlightProbes.size >= 2 || Date.now() - (probeAttempts.get(filePath) || 0) < 30000) return;
 
+  probeAttempts.set(filePath, Date.now());
+  if (probeAttempts.size > 1000) probeAttempts.delete(probeAttempts.keys().next().value);
   inFlightProbes.add(filePath);
   const ffprobePath = findFfprobe();
 
@@ -138,7 +141,7 @@ export function findPrimaryVideoInFolder(item) {
   if (!item || !item.absolutePath) return null;
 
   // Single file item
-  if (item.type === 'file') {
+  if (item.type === 'file' || item.isDirectory === false) {
     const ext = path.extname(item.name || '').toLowerCase();
     if (!VIDEO_EXTENSIONS.has(ext)) return null;
     return {
@@ -150,9 +153,9 @@ export function findPrimaryVideoInFolder(item) {
   }
 
   // Directory item: check cache first
-  const cacheKey = `${item.absolutePath}:${item.mtime || item.sizeOnDisk || 0}`;
+  const cacheKey = item.absolutePath;
   const cached = folderPrimaryVideoCache.get(cacheKey);
-  if (cached && (Date.now() - cached.cachedAt) < 10000) {
+  if (cached && cached.mtime === item.mtime && (Date.now() - cached.cachedAt) < 10000) {
     return cached.result;
   }
 
@@ -180,7 +183,8 @@ export function findPrimaryVideoInFolder(item) {
       ? candidates.reduce((a, b) => (a.length > b.length ? a : b))
       : null;
 
-    folderPrimaryVideoCache.set(cacheKey, { result, cachedAt: Date.now() });
+    folderPrimaryVideoCache.set(cacheKey, { result, mtime: item.mtime, cachedAt: Date.now() });
+    if (folderPrimaryVideoCache.size > 1000) folderPrimaryVideoCache.delete(folderPrimaryVideoCache.keys().next().value);
     return result;
   } catch {
     return null;
@@ -201,8 +205,8 @@ export function assessTorrentPlayability(torrent, downloadDir) {
   }
 
   // If torrent or file is 100% complete
-  const isDone = !!(torrent.done || (primary.length > 0 && primary.downloaded >= primary.length * 0.999));
-  if (isDone) {
+  const isDone = !!(torrent.done || primary.file.done);
+  if (isDone && fs.existsSync(primary.fullPath)) {
     return {
       isMedia: true,
       canPlay: true,
@@ -232,8 +236,18 @@ export function assessTorrentPlayability(torrent, downloadDir) {
   // Requirement 1: Container header safety threshold.
   // Matroska / MP4 container headers, audio tracks, and initial cluster must be present.
   const minHeaderBytes = Math.min(25 * 1024 * 1024, totalLength * 0.02);
-  if (downloaded < minHeaderBytes) {
-    const needed = minHeaderBytes - downloaded;
+  // Download totals include unverified/out-of-order blocks. Only consecutive
+  // verified pieces at this file's offset can supply playable headers.
+  let bufferedBytes = 0;
+  if (torrent.bitfield && torrent.pieceLength > 0) {
+    const offset = primary.file.offset || 0;
+    for (let piece = Math.floor(offset / torrent.pieceLength);
+      piece * torrent.pieceLength < offset + totalLength && torrent.bitfield.get(piece); piece++) {
+      bufferedBytes = Math.min(totalLength, (piece + 1) * torrent.pieceLength - offset);
+    }
+  }
+  if (bufferedBytes < minHeaderBytes) {
+    const needed = minHeaderBytes - bufferedBytes;
     return {
       isMedia: true,
       canPlay: false,
@@ -250,7 +264,8 @@ export function assessTorrentPlayability(torrent, downloadDir) {
   // Requirement 2: Continuous buffer streaming equation
   const cachedMeta = metaCache.get(primary.fullPath);
   const duration = cachedMeta?.duration || estimateDuration(totalLength);
-  const speed = torrent.downloadSpeed || 0;
+  const isPaused = torrent.paused || torrent._pausedManually;
+  const speed = isPaused ? 0 : (torrent.downloadSpeed || 0);
 
   // If download is paused or stalled (< 50 KB/s)
   if (speed < 50 * 1024) {
@@ -261,7 +276,7 @@ export function assessTorrentPlayability(torrent, downloadDir) {
       filePath: primary.fullPath,
       duration,
       progress: progressRatio,
-      reason: torrent.paused ? 'Download paused' : 'Speed too low to stream without buffering',
+      reason: isPaused ? 'Download paused' : 'Speed too low to stream without buffering',
     };
   }
 
@@ -340,6 +355,13 @@ export function assessFolderItemPlayability(item) {
  * Launch VLC or the host operating system's default media player.
  */
 export function launchMediaPlayer(filePath, cb) {
+  let settled = false;
+  const callback = cb;
+  cb = (...args) => {
+    if (settled) return;
+    settled = true;
+    callback(...args);
+  };
   if (!filePath || !fs.existsSync(filePath)) {
     return cb(new Error('Media file not found on disk'));
   }
@@ -359,12 +381,12 @@ export function launchMediaPlayer(filePath, cb) {
   if (process.platform === 'win32') {
     const child = spawn('cmd', ['/c', 'start', '""', filePath]);
     child.on('error', cb);
-    child.on('close', () => cb(null, 'Default Player'));
+    child.on('close', (code) => cb(code === 0 ? null : new Error(`Player exited with code ${code}`), 'Default Player'));
     return;
   }
 
   // Linux
   const child = spawn('xdg-open', [filePath]);
   child.on('error', cb);
-  child.on('close', () => cb(null, 'Default Player'));
+  child.on('close', (code) => cb(code === 0 ? null : new Error(`Player exited with code ${code}`), 'Default Player'));
 }
