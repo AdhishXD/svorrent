@@ -1009,6 +1009,7 @@ app.post('/api/torrent/:id/open-finder', async (req, res) => {
       if (code !== 0) return onOpen(new Error('Finder could not open the download location'));
       onOpen(null);
     });
+  }
   if (process.platform === 'win32') {
     const explorerArgs = targetFile ? [`/select,${targetFile}`] : [basePath];
     return execFile('explorer.exe', explorerArgs, onOpen);

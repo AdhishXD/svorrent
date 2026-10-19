@@ -14,7 +14,7 @@ export function cleanMagnet(source) {
   if (!/^urn:btih:(?:[a-f0-9]{40}|[a-z2-7]{32})$/i.test(params.get('xt') || '')) {
     throw new Error('Invalid BitTorrent info hash');
   }
-  return `magnet:?${params.toString()}`;
+  return `magnet:?${params.toString().replace(/xt=urn%3Abtih%3A/gi, 'xt=urn:btih:')}`;
 }
 
 export function extractInfoHash(source) {
