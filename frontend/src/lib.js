@@ -1,4 +1,6 @@
-export const API = 'http://localhost:3001/api';
+export const API = typeof window !== 'undefined' && (window.location.port === '3001' || !window.location.port)
+  ? '/api'
+  : 'http://localhost:3001/api';
 
 export async function apiGet(path) {
   const res = await fetch(`${API}${path}`);

@@ -3,6 +3,10 @@ import cors from 'cors';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 import net from 'node:net';
 import dgram from 'node:dgram';
 import { spawn, exec } from 'node:child_process';
@@ -1177,6 +1181,20 @@ app.post('/api/torrent/:id/recheck', async (req, res) => {
     res.json({ success: true, progress: torrent.progress || 0 });
   }
 });
+
+// ---------------------------------------------------------------------------
+// Static Web App Serving
+// ---------------------------------------------------------------------------
+const frontendDist = path.resolve(__dirname, '../frontend/dist');
+if (fs.existsSync(frontendDist)) {
+  app.use(express.static(frontendDist));
+  app.use((req, res, next) => {
+    if (req.method === 'GET' && !req.path.startsWith('/api')) {
+      return res.sendFile(path.join(frontendDist, 'index.html'));
+    }
+    next();
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Server Initialization
