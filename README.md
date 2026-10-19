@@ -16,15 +16,17 @@
 
 ---
 
-## Downloads (v1.0.0)
+## Downloads (v1.0.1)
 
 Svorrent uses a local web interface. Desktop launchers start the backend and open the interface in your default browser. Node.js 18 or newer is required; the current packages do not bundle it.
 
 | Platform | Package | Size | Description |
 | :--- | :--- | :--- | :--- |
-| **Windows (x64)** | [**`Svorrent-Setup.exe`**](https://github.com/sovopr/svorrent/releases/download/v1.0.0/Svorrent-Setup.exe) | **9.8 MB** | **Recommended.** Modern Windows installer with Desktop & Start Menu shortcuts. |
-| **Windows (x64)** | [**`Svorrent-Windows-x64-Portable.zip`**](https://github.com/sovopr/svorrent/releases/download/v1.0.0/Svorrent-Windows-x64-Portable.zip) | **20.0 MB** | Standalone portable archive. Unzip anywhere and launch `Svorrent.exe`. |
-| **macOS (Universal)** | [**`Svorrent.dmg`**](https://github.com/sovopr/svorrent/releases/download/v1.0.0/Svorrent.dmg) | **19.6 MB** | Native Apple disk image. Drag `Svorrent.app` into `/Applications`. |
+| **Windows (x64)** | [**`Svorrent-Setup.exe`**](https://github.com/sovopr/svorrent/releases/download/v1.0.1/Svorrent-Setup.exe) | **10.3 MB** | Installer with Desktop & Start Menu shortcuts. |
+| **Windows (x64)** | [**`Svorrent-Windows-x64-Portable.zip`**](https://github.com/sovopr/svorrent/releases/download/v1.0.1/Svorrent-Windows-x64-Portable.zip) | **21.3 MB** | Standalone portable archive. Unzip anywhere and launch `Svorrent.exe`. |
+| **macOS (Apple Silicon)** | [**`Svorrent.dmg`**](https://github.com/sovopr/svorrent/releases/download/v1.0.1/Svorrent.dmg) | **20.5 MB** | Native Apple Silicon disk image. Drag `Svorrent.app` into `/Applications`. |
+
+The macOS package is arm64-only; an Intel Mac build is not currently available.
 
 ---
 
@@ -156,7 +158,7 @@ The interface runs on `http://localhost:5173`.
 
 ### 3. Packaging Releases
 
-To build production desktop distributions (< 20 MB):
+To build the production desktop distributions (approximately 10–21 MB):
 
 ```bash
 # Build macOS .dmg (outputs to dist-app/Svorrent.dmg)
@@ -261,7 +263,7 @@ flowchart TD
 | Component | Implementation |
 | :--- | :--- |
 | Core Protocol & Swarm | WebTorrent, P2P Wire Protocol, DHT |
-| Desktop Architecture | Native Win32 / macOS browser-client launchers (< 20 MB footprint, no Electron overhead) |
+| Desktop Architecture | Native Win32 / macOS browser-client launchers (approximately 10–21 MB packages, no Electron overhead) |
 | Search Engine | Multi-provider aggregation with bounded timeouts & DoH anti-censorship shield |
 | Network Routing & Bonding | Multi-interface OS socket binding via local IP assignment and dynamic routing table failover |
 | Media Analysis | ffprobe metadata extraction + analytic ETA-vs-runtime buffer formula |
