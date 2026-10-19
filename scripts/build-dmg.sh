@@ -132,20 +132,16 @@ cp -R "$ROOT_DIR/backend/lib" "$APP_BUNDLE/Contents/Resources/app/backend/"
 cp -R "$ROOT_DIR/backend/bin" "$APP_BUNDLE/Contents/Resources/app/backend/"
 cp -R "$ROOT_DIR/backend/node_modules" "$APP_BUNDLE/Contents/Resources/app/backend/"
 
-# Bundle real node binary if available for turnkey zero-dependency execution
-REAL_NODE="$(readlink -f "$(which node)" 2>/dev/null || which node)"
-if [ -x "$REAL_NODE" ]; then
-    echo "==> 7. Bundling standalone Node binary ($REAL_NODE)..."
-    cp "$REAL_NODE" "$APP_BUNDLE/Contents/Resources/node"
-    chmod +x "$APP_BUNDLE/Contents/Resources/node"
-fi
+# Prune heavy unused databases (strip 104MB city-level GeoIP data; keep country data)
+echo "==> 7. Pruning heavy offline city databases..."
+rm -f "$APP_BUNDLE/Contents/Resources/app/backend/node_modules/geoip-lite/data/geoip-city"*
 
 echo "==> 8. Creating DMG Staging with Applications shortcut..."
 cp -R "$APP_BUNDLE" "$DMG_STAGING/"
 ln -s /Applications "$DMG_STAGING/Applications"
 
-echo "==> 9. Generating Apple compressed DMG installer..."
-hdiutil create -volname "Svorrent" -srcfolder "$DMG_STAGING" -ov -format UDZO "$DMG_OUTPUT"
+echo "==> 9. Generating lightweight compressed DMG installer (BitTorrent Web profile)..."
+hdiutil create -volname "Svorrent" -srcfolder "$DMG_STAGING" -ov -fs HFS+ -format UDBZ "$DMG_OUTPUT"
 
 rm -rf "$DMG_STAGING"
 
