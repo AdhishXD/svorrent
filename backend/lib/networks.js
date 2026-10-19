@@ -385,6 +385,9 @@ export class NetworkManager {
     if (client.torrents && availableActiveIds.length > 0) {
       for (const t of client.torrents) {
         if (!t.wires) continue;
+        let torrentWireUp = 0;
+        const torrentIfaceWires = new Map();
+
         for (const wire of t.wires) {
           if (wire.destroyed) continue;
           let ifaceId = null;
@@ -419,11 +422,27 @@ export class NetworkManager {
 
           const downSpeed = typeof wire.downloadSpeed === 'function' ? wire.downloadSpeed() : 0;
           const upSpeed = typeof wire.uploadSpeed === 'function' ? wire.uploadSpeed() : 0;
+          torrentWireUp += upSpeed;
 
           if (speedMap.has(ifaceId)) {
             speedMap.set(ifaceId, speedMap.get(ifaceId) + downSpeed);
             upMap.set(ifaceId, upMap.get(ifaceId) + upSpeed);
             peerMap.set(ifaceId, peerMap.get(ifaceId) + 1);
+            torrentIfaceWires.set(ifaceId, (torrentIfaceWires.get(ifaceId) || 0) + 1);
+          }
+        }
+
+        // Harmonize upload speeds: wire.uploadSpeed() only counts payload pieces sent when peers request them.
+        // During active downloading, WebTorrent emits outgoing piece requests, HAVE notifications, DHT pings,
+        // and keepalives (tracked by t.uploadSpeed). If t.uploadSpeed exceeds raw piece upload, allocate
+        // the remaining outgoing socket throughput across this torrent's active interfaces.
+        const totalTorrentUp = typeof t.uploadSpeed === 'number' ? t.uploadSpeed : 0;
+        const unallocatedUp = Math.max(0, totalTorrentUp - torrentWireUp);
+        if (unallocatedUp > 0 && torrentIfaceWires.size > 0) {
+          const totalWiresInTorrent = Array.from(torrentIfaceWires.values()).reduce((a, b) => a + b, 0);
+          for (const [ifaceId, count] of torrentIfaceWires.entries()) {
+            const share = Math.round(unallocatedUp * (count / totalWiresInTorrent));
+            upMap.set(ifaceId, (upMap.get(ifaceId) || 0) + share);
           }
         }
       }

@@ -40,16 +40,24 @@ export function formatBytes(bytes) {
   return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
 }
 
+// Cache for smoothed speed calculation: torrentKey -> { ema: number, lastUpdate: number }
+const torrentSpeedEma = new Map();
+
 /**
- * Format duration/eta in seconds into human readable format (e.g. 14m, 1h 22m).
+ * Format duration/eta in seconds into human readable format (e.g. 45s, 14m, 1h 22m, 2d 4h).
  */
 export function formatEta(seconds) {
   if (!seconds || seconds <= 0 || !isFinite(seconds)) return '0s';
   if (seconds < 60) return `${Math.ceil(seconds)}s`;
   if (seconds < 3600) return `${Math.ceil(seconds / 60)}m`;
   const hours = Math.floor(seconds / 3600);
-  const mins = Math.ceil((seconds % 3600) / 60);
-  return `${hours}h ${mins}m`;
+  if (hours < 24) {
+    const mins = Math.ceil((seconds % 3600) / 60);
+    return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  }
+  const days = Math.floor(hours / 24);
+  const remHours = hours % 24;
+  return remHours > 0 ? `${days}d ${remHours}h` : `${days}d`;
 }
 
 /**
@@ -248,29 +256,42 @@ export function assessTorrentPlayability(torrent, downloadDir) {
       bufferedBytes = Math.min(totalLength, (piece + 1) * torrent.pieceLength - offset);
     }
   }
-  if (bufferedBytes < minHeaderBytes) {
-    const needed = minHeaderBytes - bufferedBytes;
-    return {
-      isMedia: true,
-      canPlay: false,
-      fileName: primary.name,
-      filePath: primary.fullPath,
-      progress: progressRatio,
-      reason: `Buffering headers… (need ${formatBytes(needed)} more)`,
-    };
-  }
 
   // Queue background ffprobe extraction if headers are present
-  probeMediaAsync(primary.fullPath);
+  if (bufferedBytes >= minHeaderBytes) {
+    probeMediaAsync(primary.fullPath);
+  }
 
   // Requirement 2: Continuous buffer streaming equation
   const cachedMeta = metaCache.get(primary.fullPath);
   const duration = cachedMeta?.duration || estimateDuration(totalLength);
-  const isPaused = torrent.paused || torrent._pausedManually;
-  const speed = isPaused ? 0 : (torrent.downloadSpeed || 0);
+  const isPaused = !!(torrent.paused || torrent._pausedManually);
+  const rawSpeed = isPaused ? 0 : (torrent.downloadSpeed || 0);
 
-  // If download is paused or stalled (< 50 KB/s)
-  if (speed < 50 * 1024) {
+  // Speed smoothing via exponential moving average (EMA) to damp out momentary piece-boundary drops
+  const torrentKey = torrent.infoHash || torrent.name || primary.fullPath;
+  let effectiveSpeed = rawSpeed;
+  if (!isPaused && rawSpeed > 0) {
+    const now = Date.now();
+    const prev = torrentSpeedEma.get(torrentKey);
+    if (prev && (now - prev.lastUpdate) < 10000) {
+      const smoothed = Math.round(prev.ema * 0.7 + rawSpeed * 0.3);
+      torrentSpeedEma.set(torrentKey, { ema: smoothed, lastUpdate: now });
+      effectiveSpeed = Math.max(rawSpeed, smoothed);
+    } else {
+      torrentSpeedEma.set(torrentKey, { ema: rawSpeed, lastUpdate: now });
+    }
+  } else if (isPaused) {
+    torrentSpeedEma.delete(torrentKey);
+  }
+
+  const safetyMargin = 1.20; // 20% safety margin against connection fluctuations
+
+  // If download is paused
+  if (isPaused) {
+    const safeDownloadedTarget = Math.max(0, totalLength - (duration > 0 ? (1024 * 1024 * duration) / safetyMargin : 0));
+    const headerNeeded = Math.max(0, minHeaderBytes - bufferedBytes);
+    const bufferNeeded = Math.max(headerNeeded, safeDownloadedTarget - downloaded);
     return {
       isMedia: true,
       canPlay: false,
@@ -278,16 +299,38 @@ export function assessTorrentPlayability(torrent, downloadDir) {
       filePath: primary.fullPath,
       duration,
       progress: progressRatio,
-      reason: isPaused ? 'Download paused' : 'Speed too low to stream without buffering',
+      bufferNeeded,
+      secondsUntilSafe: null,
+      timeToPlay: null,
+      reason: `Download paused · Resume download to estimate time to play (needs ~${formatBytes(bufferNeeded)} buffer)`,
+    };
+  }
+
+  // If download is stalled or zero speed
+  if (effectiveSpeed <= 0) {
+    const safeDownloadedTarget = Math.max(0, totalLength - (duration > 0 ? (1024 * 1024 * duration) / safetyMargin : 0));
+    const headerNeeded = Math.max(0, minHeaderBytes - bufferedBytes);
+    const bufferNeeded = Math.max(headerNeeded, safeDownloadedTarget - downloaded);
+    return {
+      isMedia: true,
+      canPlay: false,
+      fileName: primary.name,
+      filePath: primary.fullPath,
+      duration,
+      progress: progressRatio,
+      bufferNeeded,
+      secondsUntilSafe: null,
+      timeToPlay: null,
+      reason: `Waiting for peers · Need ~${formatBytes(bufferNeeded)} buffer to stream without buffering`,
     };
   }
 
   const remainingBytes = Math.max(0, totalLength - downloaded);
-  const etaSeconds = remainingBytes / speed;
-  const safetyMargin = 1.20; // 20% safety margin against connection fluctuations
+  const etaSeconds = remainingBytes / effectiveSpeed;
+  const headersReady = bufferedBytes >= minHeaderBytes;
 
   // Physical Condition: Download ETA with 20% margin <= Total Video Runtime
-  if (etaSeconds * safetyMargin <= duration) {
+  if (headersReady && (etaSeconds * safetyMargin <= duration)) {
     return {
       isMedia: true,
       canPlay: true,
@@ -295,14 +338,51 @@ export function assessTorrentPlayability(torrent, downloadDir) {
       filePath: primary.fullPath,
       duration,
       progress: progressRatio,
+      secondsUntilSafe: 0,
+      timeToPlay: '0s',
       reason: 'Play in VLC (Safe to stream without buffering)',
     };
   }
 
   // Calculate buffer required to reach the safe streaming threshold
-  const safeDownloadedTarget = Math.max(0, totalLength - (speed * duration) / safetyMargin);
-  const bufferNeeded = Math.max(0, safeDownloadedTarget - downloaded);
-  const secondsUntilSafe = Math.ceil(bufferNeeded / speed);
+  const safeDownloadedTarget = Math.max(0, totalLength - (effectiveSpeed * duration) / safetyMargin);
+  const headerNeeded = Math.max(0, minHeaderBytes - bufferedBytes);
+  const streamingBufferNeeded = Math.max(0, safeDownloadedTarget - downloaded);
+  const bufferNeeded = Math.max(headerNeeded, streamingBufferNeeded);
+  const secondsUntilSafe = Math.ceil(bufferNeeded / effectiveSpeed);
+  const timeFormatted = formatEta(secondsUntilSafe);
+
+  // If headers are still buffering
+  if (!headersReady) {
+    return {
+      isMedia: true,
+      canPlay: false,
+      fileName: primary.name,
+      filePath: primary.fullPath,
+      duration,
+      progress: progressRatio,
+      bufferNeeded,
+      secondsUntilSafe,
+      timeToPlay: timeFormatted,
+      reason: `Buffering headers · Estimated time to play: ~${timeFormatted} (need ${formatBytes(bufferNeeded)} buffer)`,
+    };
+  }
+
+  // If speed is particularly low (< 50 KB/s)
+  if (effectiveSpeed < 50 * 1024) {
+    return {
+      isMedia: true,
+      canPlay: false,
+      fileName: primary.name,
+      filePath: primary.fullPath,
+      duration,
+      progress: progressRatio,
+      bufferNeeded,
+      secondsUntilSafe,
+      timeToPlay: timeFormatted,
+      reason: `Speed low (${formatBytes(effectiveSpeed)}/s) · Estimated time to play: ~${timeFormatted} (need ${formatBytes(bufferNeeded)} buffer)`,
+    };
+  }
 
   return {
     isMedia: true,
@@ -313,7 +393,8 @@ export function assessTorrentPlayability(torrent, downloadDir) {
     progress: progressRatio,
     bufferNeeded,
     secondsUntilSafe,
-    reason: `Buffering… Safe in ~${formatEta(secondsUntilSafe)} (need ${formatBytes(bufferNeeded)} more buffer)`,
+    timeToPlay: timeFormatted,
+    reason: `Estimated time to play: ~${timeFormatted} (need ${formatBytes(bufferNeeded)} more buffer to stream smoothly)`,
   };
 }
 
@@ -349,7 +430,7 @@ export function assessFolderItemPlayability(item) {
     fileName: primary.name,
     filePath: primary.fullPath,
     progress: (primary.downloaded || 0) / (primary.length || 1),
-    reason: 'Incomplete file (resume download to play)',
+    reason: 'Incomplete file (resume download to estimate time to play)',
   };
 }
 
