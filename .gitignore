@@ -18,3 +18,4 @@ dist-app/
 dist-win/
 *.exe
 scripts/cache/
+scratch/
