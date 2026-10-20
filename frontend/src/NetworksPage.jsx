@@ -183,6 +183,7 @@ export function NetworksPage({ notify, isActive = true }) {
   } = data;
 
   const connectedInterfaces = interfaces.filter((i) => i.connected);
+  const selfAssignedInterfaces = interfaces.filter((i) => i.statusReason === 'link-local');
   const activeInterfaces = interfaces.filter((i) => i.connected && i.enabled);
   const hasMultiple = bondedCount > 1;
   const downloadShare = (iface) => totalDownSpeed > 0 && iface.connected && iface.enabled
@@ -213,6 +214,20 @@ export function NetworksPage({ notify, isActive = true }) {
       </div>
 
       {error && <p className="muted" role="alert">Network update failed: {error} Retrying automatically.</p>}
+
+      {selfAssignedInterfaces.length > 0 && (
+        <div className="usb-tether-banner" role="status">
+          <div className="usb-tether-dot" />
+          <div className="usb-tether-content">
+            <span className="usb-tether-title">
+              {selfAssignedInterfaces.map((iface) => iface.device).join(', ')} has a self-assigned address
+            </span>
+            <span className="usb-tether-hint muted">
+              This adapter cannot carry internet traffic yet. Check its network service and DHCP settings in macOS, then refresh adapters.
+            </span>
+          </div>
+        </div>
+      )}
 
       {data?.usbTether?.detected && !data?.usbTether?.interfaceActive && (
         <div className="usb-tether-banner">
@@ -373,7 +388,7 @@ export function NetworksPage({ notify, isActive = true }) {
                         <span
                           className={`status-dot ${isOnline ? 'is-online' : 'is-offline'}`}
                           style={{ backgroundColor: isOnline ? color : undefined }}
-                          title={!iface.connected ? 'Disconnected' : iface.enabled ? 'Routing enabled' : 'Routing disabled'}
+                          title={iface.statusReason === 'link-local' ? 'Self-assigned address; no internet route' : !iface.connected ? 'Disconnected' : iface.enabled ? 'Routing enabled' : 'Routing disabled'}
                         />
                       </td>
                       <td className="col-iface">
@@ -381,6 +396,7 @@ export function NetworksPage({ notify, isActive = true }) {
                           <span className="iface-name">{iface.name}</span>
                         </div>
                         <span className="mono muted iface-device">{iface.device}</span>
+                        {iface.statusReason === 'link-local' && <span className="mono muted iface-device">Needs DHCP</span>}
                       </td>
                       <td className="col-type">
                         <span className={`tag tag-iface tag-${iface.type}`}>
@@ -404,7 +420,7 @@ export function NetworksPage({ notify, isActive = true }) {
                           disabled={pendingAction !== null || !iface.connected}
                           aria-pressed={!!iface.enabled}
                           aria-label={`Toggle routing on ${iface.name}`}
-                          title={iface.enabled ? 'Disable adapter' : 'Enable adapter'}
+                          title={iface.statusReason === 'link-local' ? 'Configure this adapter in macOS Network settings first' : iface.enabled ? 'Disable adapter' : 'Enable adapter'}
                         >
                           <span className="toggle-thumb" />
                         </button>
