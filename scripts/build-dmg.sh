@@ -17,7 +17,8 @@ cd "$ROOT_DIR/frontend"
 npm run build
 
 echo "==> 2. Preparing staging directories..."
-rm -rf "$BUILD_DIR"
+rm -rf "$APP_BUNDLE" "$DMG_STAGING" "$DMG_OUTPUT"
+mkdir -p "$BUILD_DIR"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources/app/backend"
 mkdir -p "$APP_BUNDLE/Contents/Resources/app/frontend/dist"
@@ -81,10 +82,44 @@ APP_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 RESOURCES_DIR="$APP_DIR/Contents/Resources"
 BACKEND_DIR="$RESOURCES_DIR/app/backend"
 LOG_DIR="$HOME/Library/Logs/Svorrent"
+JOB_LABEL="com.sovopr.svorrent.backend"
+AGENT_DIR="$HOME/Library/LaunchAgents"
+AGENT_PLIST="$AGENT_DIR/$JOB_LABEL.plist"
+JOB_TARGET="gui/$(id -u)/$JOB_LABEL"
 mkdir -p "$LOG_DIR"
 
+# A process started from the mounted installer loses its backend when the DMG
+# is ejected. Launch only the copy installed in Applications.
+if [[ "$APP_DIR" == /Volumes/* || "$APP_DIR" == */AppTranslocation/* ]]; then
+    osascript -e 'display alert "Install Svorrent first" message "Drag Svorrent.app to Applications, then open the copy in Applications."'
+    exit 1
+fi
+
+if [ ! -f "$RESOURCES_DIR/app/frontend/dist/index.html" ]; then
+    osascript -e 'display alert "Svorrent installation is incomplete" message "The web app is missing. Copy Svorrent.app to Applications again from a complete installer."'
+    exit 1
+fi
+
 # 1. If Svorrent backend is already running, immediately open default browser
-if curl -s -m 1 http://localhost:3001/api/torrents >/dev/null 2>&1; then
+backend_ready() {
+    local config torrents
+    config="$(curl -fsS --max-time 2 http://127.0.0.1:3001/api/config 2>/dev/null)" || return 1
+    [[ "$config" == \{\"downloadDir\":* ]] || return 1
+    torrents="$(curl -fsS --max-time 5 http://127.0.0.1:3001/api/torrents 2>/dev/null)" || return 1
+    [[ "$torrents" == \[*\] ]]
+}
+
+backend_owned_by_this_app() {
+    [ -f "$AGENT_PLIST" ] || return 1
+    local server_path
+    server_path="$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:2' "$AGENT_PLIST" 2>/dev/null)" || return 1
+    [ "$server_path" = "$BACKEND_DIR/server.js" ] || return 1
+    local job_status
+    job_status="$(launchctl print "$JOB_TARGET" 2>/dev/null)" || return 1
+    [[ "$job_status" == *"state = running"* ]]
+}
+
+if backend_ready && backend_owned_by_this_app; then
     open "http://localhost:3001"
     exit 0
 fi
@@ -107,20 +142,53 @@ if [ -z "$NODE_BIN" ]; then
     exit 1
 fi
 
-# 3. Launch Svorrent daemon in background
-cd "$BACKEND_DIR"
-nohup "$NODE_BIN" --openssl-legacy-provider server.js > "$LOG_DIR/svorrent.log" 2>&1 &
+# 3. Run the backend in the user's launchd domain so it survives this launcher.
+mkdir -p "$AGENT_DIR"
+
+xml_escape() {
+    local value="$1"
+    value="${value//&/\&amp;}"
+    value="${value//</\&lt;}"
+    value="${value//>/\&gt;}"
+    value="${value//\"/\&quot;}"
+    printf '%s' "$value"
+}
+
+cat > "$AGENT_PLIST" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>$JOB_LABEL</string>
+  <key>ProgramArguments</key><array>
+    <string>$(xml_escape "$NODE_BIN")</string>
+    <string>--openssl-legacy-provider</string>
+    <string>$(xml_escape "$BACKEND_DIR/server.js")</string>
+  </array>
+  <key>WorkingDirectory</key><string>$(xml_escape "$BACKEND_DIR")</string>
+  <key>StandardOutPath</key><string>$(xml_escape "$LOG_DIR/svorrent.log")</string>
+  <key>StandardErrorPath</key><string>$(xml_escape "$LOG_DIR/svorrent.log")</string>
+  <key>RunAtLoad</key><true/>
+</dict></plist>
+PLIST
+
+launchctl bootout "$JOB_TARGET" >/dev/null 2>&1 || true
+launchctl remove "$JOB_LABEL" >/dev/null 2>&1 || true
+: > "$LOG_DIR/svorrent.log"
+if ! launchctl bootstrap "gui/$(id -u)" "$AGENT_PLIST"; then
+    osascript -e 'display alert "Svorrent could not start" message "The local server could not be registered. Check ~/Library/Logs/Svorrent/svorrent.log, then try again."'
+    exit 1
+fi
 
 # 4. Wait for server readiness
-for i in {1..20}; do
-    if curl -s -m 1 http://localhost:3001/api/torrents >/dev/null 2>&1; then
+for i in {1..60}; do
+    if backend_ready && backend_owned_by_this_app; then
         break
     fi
     sleep 0.3
 done
 
 # 5. Open in user's default browser
-if ! curl -s -m 1 http://localhost:3001/api/torrents >/dev/null 2>&1; then
+if ! backend_ready || ! backend_owned_by_this_app; then
     osascript -e 'display alert "Svorrent could not start" message "The local server did not become ready. Check ~/Library/Logs/Svorrent/svorrent.log, then try again."'
     exit 1
 fi
