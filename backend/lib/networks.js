@@ -31,6 +31,11 @@ function classifyInterface(name, device) {
   return 'other';
 }
 
+export function isUsableIpv4(address) {
+  return net.isIPv4(address) && !address.startsWith('169.254.') &&
+    address !== '0.0.0.0' && !address.startsWith('127.');
+}
+
 async function getMacHardwarePortNames() {
   const map = new Map();
   if (process.platform !== 'darwin') return map;
@@ -263,6 +268,7 @@ export class NetworkManager {
             }
           }
           const type = classifyInterface(humanName, device);
+          const linkLocal = addr.address.startsWith('169.254.');
           list.push({
             id: device,
             device,
@@ -271,7 +277,8 @@ export class NetworkManager {
             netmask: addr.netmask,
             mac: addr.mac,
             type,
-            connected: true,
+            connected: isUsableIpv4(addr.address),
+            statusReason: linkLocal ? 'link-local' : null,
           });
         }
       }
@@ -381,7 +388,6 @@ export class NetworkManager {
     }
 
     // Collect throughput directly from all active torrent wires
-    let wireIdx = 0;
     if (client.torrents && availableActiveIds.length > 0) {
       for (const t of client.torrents) {
         if (!t.wires) continue;
@@ -407,18 +413,16 @@ export class NetworkManager {
             }
           }
 
-          // 3. Fall back to existing cached wire assignment or round-robin
+          // 3. Reuse a previously observed assignment. Unknown sockets must
+          // not be credited to an adapter that may not have carried them.
           if (!ifaceId || !availableActiveIds.includes(ifaceId)) {
             const existing = this.wireToInterface.get(wire);
             if (existing && availableActiveIds.includes(existing) && !this.disabledIds.has(existing)) {
               ifaceId = existing;
-            } else {
-              ifaceId = availableActiveIds[wireIdx % availableActiveIds.length];
             }
           }
 
-          this.wireToInterface.set(wire, ifaceId);
-          wireIdx++;
+          if (ifaceId) this.wireToInterface.set(wire, ifaceId);
 
           const downSpeed = typeof wire.downloadSpeed === 'function' ? wire.downloadSpeed() : 0;
           const upSpeed = typeof wire.uploadSpeed === 'function' ? wire.uploadSpeed() : 0;
@@ -509,6 +513,7 @@ export class NetworkManager {
         name: iface.name,
         ip: iface.ip,
         type: iface.type,
+        statusReason: iface.statusReason,
         connected: isConnected,
         enabled: isEnabled,
         downSpeed: currentDown,
