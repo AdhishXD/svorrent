@@ -17,6 +17,7 @@ function App() {
   const [route, setRoute] = useState(routeFromPath);
   const [torrents, setTorrents] = useState([]);
   const [backendUp, setBackendUp] = useState(true);
+  const [backendError, setBackendError] = useState('');
   const [toast, setToast] = useState(null);
   const toastTimer = useRef(null);
   const polling = useRef(null);
@@ -45,9 +46,13 @@ function App() {
           if (session.active && !session.queued) {
             setTorrents(list);
             setBackendUp(true);
+            setBackendError('');
           }
-        } catch {
-          if (session.active && !session.queued) setBackendUp(false);
+        } catch (error) {
+          if (session.active && !session.queued) {
+            setBackendUp(false);
+            setBackendError(error instanceof Error ? error.message : 'Request failed');
+          }
         }
       } while (session.active && session.queued);
     })().finally(() => {
@@ -169,7 +174,9 @@ function App() {
 
           <div className="topbar-status">
             {!backendUp ? (
-              <span className="status-offline" role="status">Backend unavailable</span>
+              <span className="status-offline" role="status" title={backendError}>
+                Backend unavailable{backendError ? `: ${backendError}` : ''}
+              </span>
             ) : (
               <>
                 <span className="rate" title="Total download rate">

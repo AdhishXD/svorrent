@@ -198,6 +198,10 @@ a {
 
 .status-offline {
   color: var(--danger);
+  max-width: min(48vw, 520px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .page {

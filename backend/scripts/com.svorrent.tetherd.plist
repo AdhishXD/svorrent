@@ -6,7 +6,7 @@
     <string>com.svorrent.tetherd</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Library/PrivilegedHelperTools/svorrent-tetherd</string>
+        <string>/Library/PrivilegedHelperTools/com.svorrent.tetherd/svorrent-tetherd</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
