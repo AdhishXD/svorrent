@@ -19,3 +19,4 @@ dist-win/
 *.exe
 scripts/cache/
 scratch/
+backend/bin/svorrent-tetherd
