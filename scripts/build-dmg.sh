@@ -12,6 +12,36 @@ APP_BUNDLE="$BUILD_DIR/Svorrent.app"
 DMG_STAGING="$BUILD_DIR/dmg-staging"
 DMG_OUTPUT="$BUILD_DIR/Svorrent.dmg"
 
+echo "==> Building Android USB tethering helper..."
+NATIVE_DIR="$BUILD_DIR/native"
+mkdir -p "$NATIVE_DIR"
+CXX="${SVORRENT_CXX:-/Library/Developer/CommandLineTools/usr/bin/clang++}"
+SDK="${SVORRENT_SDK:-/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk}"
+OTOOL="${SVORRENT_OTOOL:-/Library/Developer/CommandLineTools/usr/bin/otool}"
+INSTALL_NAME_TOOL="${SVORRENT_INSTALL_NAME_TOOL:-/Library/Developer/CommandLineTools/usr/bin/install_name_tool}"
+if [ ! -x "$CXX" ] || [ ! -d "$SDK" ] || [ ! -x "$OTOOL" ] || [ ! -x "$INSTALL_NAME_TOOL" ]; then
+    echo "A macOS C++ toolchain and SDK are required to build Android USB support." >&2
+    exit 1
+fi
+"$CXX" -isysroot "$SDK" -mmacosx-version-min=26.0 -O2 -std=c++17 -Wall -Wextra \
+    "$ROOT_DIR/backend/tether/svorrent-tetherd.cc" \
+    -L"$ROOT_DIR/backend/bin" -ltetherkit \
+    -o "$NATIVE_DIR/svorrent-tetherd"
+TETHER_LIBRARY="$("$OTOOL" -L "$NATIVE_DIR/svorrent-tetherd" | awk '/libtetherkit\.0\.dylib/{print $1; exit}')"
+if [ -z "$TETHER_LIBRARY" ]; then
+    echo "The native helper did not link against TetherKit." >&2
+    exit 1
+fi
+"$INSTALL_NAME_TOOL" -change "$TETHER_LIBRARY" \
+    '@executable_path/libtetherkit.0.dylib' "$NATIVE_DIR/svorrent-tetherd"
+codesign --force --sign - "$NATIVE_DIR/svorrent-tetherd"
+cp -a "$ROOT_DIR/backend/bin"/libtetherkit*.dylib "$ROOT_DIR/backend/bin"/libusb-*.dylib "$NATIVE_DIR/"
+for library in "$NATIVE_DIR/libtetherkit.0.1.5.dylib" "$NATIVE_DIR/libusb-1.0.0.dylib"; do
+    test -f "$library"
+    xattr -d com.apple.quarantine "$library" 2>/dev/null || true
+done
+"$NATIVE_DIR/svorrent-tetherd" --list >/dev/null
+
 echo "==> 1. Building React frontend..."
 cd "$ROOT_DIR/frontend"
 npm run build
@@ -98,6 +128,29 @@ fi
 if [ ! -f "$RESOURCES_DIR/app/frontend/dist/index.html" ]; then
     osascript -e 'display alert "Svorrent installation is incomplete" message "The web app is missing. Copy Svorrent.app to Applications again from a complete installer."'
     exit 1
+fi
+
+# A one-time administrator approval installs the bundled TetherKit-based helper.
+# The helper watches for Android USB tethering and creates a DHCP-configured
+# feth interface without changing the Mac's existing default route.
+TETHER_HELPER="/Library/PrivilegedHelperTools/com.svorrent.tetherd/svorrent-tetherd"
+TETHER_INSTALLER="$BACKEND_DIR/scripts/install-tetherd.sh"
+MACOS_MAJOR="$(sw_vers -productVersion | cut -d. -f1)"
+if [[ "$MACOS_MAJOR" =~ ^[0-9]+$ ]] && [ "$MACOS_MAJOR" -ge 26 ] && \
+   [ -x "$BACKEND_DIR/bin/svorrent-tetherd" ] && \
+   { [ ! -x "$TETHER_HELPER" ] || ! launchctl print system/com.svorrent.tetherd >/dev/null 2>&1; }; then
+    choice="$(osascript -e 'button returned of (display dialog "Enable Android USB tethering for Svorrent? This installs the bundled TetherKit-based network helper and requires one administrator approval. You can do this later by reopening Svorrent." buttons {"Later", "Enable"} default button "Enable" with icon note)' 2>/dev/null)" || choice=""
+    if [ "$choice" = "Enable" ]; then
+        if ! osascript - "$TETHER_INSTALLER" <<'APPLESCRIPT'
+on run argv
+    set installerPath to item 1 of argv
+    do shell script ("/bin/bash " & quoted form of installerPath) with administrator privileges
+end run
+APPLESCRIPT
+        then
+            osascript -e 'display alert "Android tethering setup failed" message "Svorrent can still run. Reopen it to retry Android USB setup."' || true
+        fi
+    fi
 fi
 
 # 1. If Svorrent backend is already running, immediately open default browser
@@ -202,11 +255,20 @@ cp -R "$ROOT_DIR/backend/server.js" "$APP_BUNDLE/Contents/Resources/app/backend/
 cp -R "$ROOT_DIR/backend/package.json" "$APP_BUNDLE/Contents/Resources/app/backend/"
 cp -R "$ROOT_DIR/backend/lib" "$APP_BUNDLE/Contents/Resources/app/backend/"
 cp -R "$ROOT_DIR/backend/bin" "$APP_BUNDLE/Contents/Resources/app/backend/"
+cp -f "$NATIVE_DIR/svorrent-tetherd" "$APP_BUNDLE/Contents/Resources/app/backend/bin/"
+cp -a "$NATIVE_DIR"/libtetherkit*.dylib "$NATIVE_DIR"/libusb-*.dylib \
+    "$APP_BUNDLE/Contents/Resources/app/backend/bin/"
+cp -R "$ROOT_DIR/backend/scripts" "$APP_BUNDLE/Contents/Resources/app/backend/"
+cp -R "$ROOT_DIR/backend/tether/licenses" "$APP_BUNDLE/Contents/Resources/app/backend/"
 cp -R "$ROOT_DIR/backend/node_modules" "$APP_BUNDLE/Contents/Resources/app/backend/"
 
 # Prune heavy unused databases (strip 104MB city-level GeoIP data; keep country data)
 echo "==> 7. Pruning heavy offline city databases..."
 rm -f "$APP_BUNDLE/Contents/Resources/app/backend/node_modules/geoip-lite/data/geoip-city"*
+
+# Finder metadata copied from a developer checkout can make the app fail to
+# copy out of the mounted DMG (Finder error -36). It is not application data.
+find "$APP_BUNDLE" -type f \( -name '.DS_Store' -o -name '._*' \) -delete
 
 echo "==> 8. Creating DMG Staging with Applications shortcut..."
 cp -R "$APP_BUNDLE" "$DMG_STAGING/"

@@ -88,6 +88,12 @@ Svorrent can distribute outgoing peer connections across multiple local interfac
 - **Android USB Tethering (macOS)**: Native `svorrent-tetherd` service automatically manages RNDIS virtual interface binding and DHCP configuration.
 - **Per-Adapter Controls & Live Telemetry**: Any interface in the pool can be enabled or disabled on the fly from the Networks dashboard, which displays real-time bandwidth balancing percentages, per-adapter sparklines, and session data counters.
 
+#### iPhone USB tethering on macOS
+
+Svorrent can use an iPhone's cellular connection only after macOS has established an **iPhone USB** network service with a usable IPv4 address and router. A self-assigned `169.254.x.x` address is not an internet connection; the Networks page marks it as needing DHCP and does not send torrent peers through it.
+
+With Personal Hotspot enabled on the unlocked iPhone, connect a data-capable USB cable and accept the Trust/Allow prompts. In **System Settings → Network → iPhone USB**, turn off **Disable Unless Needed**, check that TCP/IP uses DHCP, and renew the DHCP lease. If the service remains attached to an old, inactive device, remove it, reconnect the iPhone, and add the iPhone USB service again. After macOS shows a usable address and router, click **Refresh adapters** in Svorrent and pause/resume the download to establish new peer connections on both networks. See [Apple's USB hotspot troubleshooting](https://support.apple.com/en-ie/119837) and [Plexo's network troubleshooting](https://github.com/anmolkapil/plexo#troubleshooting).
+
 ---
 
 ## Architecture

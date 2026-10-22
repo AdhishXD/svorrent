@@ -306,13 +306,23 @@ async function shutdownCleanup() {
   } catch {}
   process.exit(process.exitCode || 0);
 }
-process.on('SIGINT', shutdownCleanup);
-process.on('SIGTERM', shutdownCleanup);
+process.on('SIGINT', () => {
+  console.log('[server] received SIGINT');
+  shutdownCleanup();
+});
+process.on('SIGTERM', () => {
+  console.log('[server] received SIGTERM');
+  shutdownCleanup();
+});
 
 // This daemon can read and delete local files. Do not expose it to the LAN or
 // permit an arbitrary website to call its unauthenticated API through a browser.
 app.use(localAccess);
 app.use(express.json());
+
+app.get('/api/health', (_req, res) => {
+  res.json({ app: 'svorrent', status: 'ok' });
+});
 
 app.get('/api/config', (_req, res) => {
   const home = os.homedir();

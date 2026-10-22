@@ -17,7 +17,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 function getTetherDaemonBin() {
-  const privileged = '/Library/PrivilegedHelperTools/svorrent-tetherd';
+  const privileged = '/Library/PrivilegedHelperTools/com.svorrent.tetherd/svorrent-tetherd';
   if (fs.existsSync(privileged)) return privileged;
   return path.resolve(__dirname, '../bin/svorrent-tetherd');
 }
@@ -136,8 +136,8 @@ export class NetworkManager {
     }
 
     try {
-      const { stdout: pgrepOut } = await execAsync('pgrep -x svorrent-tetherd');
-      this.isTetherDaemonRunning = !!pgrepOut.trim();
+      const { stdout } = await execFileAsync('launchctl', ['print', 'system/com.svorrent.tetherd'], { timeout: 4000 });
+      this.isTetherDaemonRunning = stdout.includes('state = running');
     } catch {
       this.isTetherDaemonRunning = false;
     }
@@ -558,6 +558,7 @@ export class NetworkManager {
       usbTether: {
         detected: this.usbTetherDevice?.found || false,
         name: this.usbTetherDevice?.name || null,
+        helperInstalled: fs.existsSync('/Library/PrivilegedHelperTools/com.svorrent.tetherd/svorrent-tetherd'),
         daemonActive: this.isTetherDaemonRunning,
         interfaceActive: all.some((i) => i.device.startsWith('feth') && i.connected),
       },

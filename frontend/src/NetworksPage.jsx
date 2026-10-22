@@ -237,7 +237,11 @@ export function NetworksPage({ notify, isActive = true }) {
               {data.usbTether.name || 'Android device'} detected via USB
             </span>
             <span className="usb-tether-hint muted">
-              To set up automatic USB tethering, run: <code>sudo ./backend/scripts/install-tetherd.sh</code>
+              {!data.usbTether.helperInstalled
+                ? 'Reopen Svorrent from Applications and choose Enable Android USB tethering when prompted.'
+                : data.usbTether.daemonActive
+                  ? 'USB tethering is detected. Waiting for macOS to assign the Android adapter an IP address.'
+                  : 'The Android USB helper is not running. Reopen Svorrent to retry setup.'}
             </span>
           </div>
         </div>
