@@ -75,7 +75,6 @@ int main(int argc, char** argv) {
     char active_interface[TK_INTERFACE_NAME_CAPACITY] = {0};
     bool once_connected = false;
     bool enumeration_failed = false;
-    int no_ip_ticks = 0;
 
     while (g_running) {
         tk_device_info_t devices[4];
@@ -174,47 +173,6 @@ int main(int argc, char** argv) {
                     session = NULL;
                     active_interface[0] = '\0';
                     cleanup_orphans();
-                } else if (status.run_state == TK_RUN_RUNNING) {
-                    // Check whether interface received a valid routable IP (not link-local 169.254.x.x)
-                    tk_net_state_t net_state;
-                    tk_error_t net_err;
-                    memset(&net_state, 0, sizeof(net_state));
-                    memset(&net_err, 0, sizeof(net_err));
-
-                    bool has_valid_ip = false;
-                    if (active_interface[0] != '\0' && tk_net_query(active_interface, &net_state, &net_err) == TK_OK) {
-                        if (net_state.has_address &&
-                            strncmp(net_state.address, "169.254.", 8) != 0 &&
-                            strcmp(net_state.address, "0.0.0.0") != 0 &&
-                            net_state.address[0] != '\0') {
-                            has_valid_ip = true;
-                        }
-                    }
-
-                    if (has_valid_ip) {
-                        no_ip_ticks = 0;
-                    } else {
-                        no_ip_ticks++;
-                        if (!status.link_up || no_ip_ticks >= 60) {
-                            printf("[svorrent-tetherd] No routable IP or link down on %s. Releasing USB device to prevent stall.\n",
-                                   active_interface);
-                            tk_session_stop(session);
-                            tk_session_destroy(session);
-                            session = NULL;
-                            active_interface[0] = '\0';
-                            cleanup_orphans();
-                            no_ip_ticks = 0;
-                            sleep(3);
-                            continue;
-                        } else if (no_ip_ticks % 15 == 0) {
-                            // Periodically re-request DHCP while waiting for the phone's tethering toggle
-                            tk_ip_config_t retry_ip;
-                            tk_ip_config_init(&retry_ip);
-                            retry_ip.mode = TK_IP_MODE_DHCP;
-                            retry_ip.set_default_route = false;
-                            tk_net_apply(active_interface, &retry_ip, NULL);
-                        }
-                    }
                 }
             }
 
@@ -225,7 +183,6 @@ int main(int argc, char** argv) {
                 session = NULL;
                 active_interface[0] = '\0';
                 cleanup_orphans();
-                no_ip_ticks = 0;
             }
         }
 
