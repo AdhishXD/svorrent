@@ -240,7 +240,7 @@ export function NetworksPage({ notify, isActive = true }) {
               {!data.usbTether.helperInstalled
                 ? 'Reopen Svorrent from Applications and choose Enable Android USB tethering when prompted.'
                 : data.usbTether.daemonActive
-                  ? 'USB tethering is detected. Waiting for macOS to assign the Android adapter an IP address.'
+                  ? 'Connected via USB. On your phone, go to Settings → Connections → Mobile Hotspot and Tethering (or Hotspot & Tethering) and turn ON "USB Tethering".'
                   : 'The Android USB helper is not running. Reopen Svorrent to retry setup.'}
             </span>
           </div>

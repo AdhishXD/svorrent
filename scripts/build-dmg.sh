@@ -130,9 +130,28 @@ if [ ! -f "$RESOURCES_DIR/app/frontend/dist/index.html" ]; then
     exit 1
 fi
 
-# Svorrent does not automatically install privileged root daemons on startup.
-# If Android USB tethering is explicitly desired, the user can install it via:
-# sudo ./backend/scripts/install-tetherd.sh
+# A one-time administrator approval installs the bundled TetherKit-based helper.
+# The helper watches for Android USB tethering and creates a DHCP-configured
+# feth interface without changing the Mac's existing default route.
+TETHER_HELPER="/Library/PrivilegedHelperTools/com.svorrent.tetherd/svorrent-tetherd"
+TETHER_INSTALLER="$BACKEND_DIR/scripts/install-tetherd.sh"
+MACOS_MAJOR="$(sw_vers -productVersion | cut -d. -f1)"
+if [[ "$MACOS_MAJOR" =~ ^[0-9]+$ ]] && [ "$MACOS_MAJOR" -ge 12 ] && \
+   [ -x "$BACKEND_DIR/bin/svorrent-tetherd" ] && \
+   { [ ! -x "$TETHER_HELPER" ] || ! launchctl print system/com.svorrent.tetherd >/dev/null 2>&1; }; then
+    choice="$(osascript -e 'button returned of (display dialog "Enable Android USB tethering for Svorrent? This installs the bundled TetherKit-based network helper and requires one administrator approval. You can do this later by reopening Svorrent." buttons {"Later", "Enable"} default button "Enable" with icon note)' 2>/dev/null)" || choice=""
+    if [ "$choice" = "Enable" ]; then
+        if ! osascript - "$TETHER_INSTALLER" <<'APPLESCRIPT'
+on run argv
+    set installerPath to item 1 of argv
+    do shell script ("/bin/bash " & quoted form of installerPath) with administrator privileges
+end run
+APPLESCRIPT
+        then
+            osascript -e 'display alert "Android tethering setup failed" message "Svorrent can still run. Reopen it to retry Android USB setup."' || true
+        fi
+    fi
+fi
 
 # 1. If Svorrent backend is already running, immediately open default browser
 backend_ready() {

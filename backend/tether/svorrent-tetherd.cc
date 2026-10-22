@@ -75,6 +75,7 @@ int main(int argc, char** argv) {
     char active_interface[TK_INTERFACE_NAME_CAPACITY] = {0};
     bool once_connected = false;
     bool enumeration_failed = false;
+    int no_ip_ticks = 0;
 
     while (g_running) {
         tk_device_info_t devices[4];
@@ -190,12 +191,11 @@ int main(int argc, char** argv) {
                         }
                     }
 
-                    if (!has_valid_ip) {
-                        // After 20 seconds without a valid routable IP or if link is down,
-                        // gracefully tear down to avoid stalling the phone's USB connection.
-                        static int s_no_ip_ticks = 0;
-                        s_no_ip_ticks++;
-                        if (s_no_ip_ticks >= 20 || !status.link_up) {
+                    if (has_valid_ip) {
+                        no_ip_ticks = 0;
+                    } else {
+                        no_ip_ticks++;
+                        if (!status.link_up || no_ip_ticks >= 60) {
                             printf("[svorrent-tetherd] No routable IP or link down on %s. Releasing USB device to prevent stall.\n",
                                    active_interface);
                             tk_session_stop(session);
@@ -203,9 +203,16 @@ int main(int argc, char** argv) {
                             session = NULL;
                             active_interface[0] = '\0';
                             cleanup_orphans();
-                            s_no_ip_ticks = 0;
-                            sleep(5);
+                            no_ip_ticks = 0;
+                            sleep(3);
                             continue;
+                        } else if (no_ip_ticks % 15 == 0) {
+                            // Periodically re-request DHCP while waiting for the phone's tethering toggle
+                            tk_ip_config_t retry_ip;
+                            tk_ip_config_init(&retry_ip);
+                            retry_ip.mode = TK_IP_MODE_DHCP;
+                            retry_ip.set_default_route = false;
+                            tk_net_apply(active_interface, &retry_ip, NULL);
                         }
                     }
                 }
@@ -218,6 +225,7 @@ int main(int argc, char** argv) {
                 session = NULL;
                 active_interface[0] = '\0';
                 cleanup_orphans();
+                no_ip_ticks = 0;
             }
         }
 
