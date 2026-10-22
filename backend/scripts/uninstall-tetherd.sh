@@ -16,5 +16,16 @@ launchctl bootout "system/${LABEL}" 2>/dev/null || true
 echo "[*] Removing daemon files..."
 rm -f "${PLIST_DEST}"
 rm -rf "${TOOL_DIR}"
+rm -f /Library/PrivilegedHelperTools/svorrent-tetherd
+rm -f /Library/PrivilegedHelperTools/libtetherkit*.dylib
+rm -f /Library/PrivilegedHelperTools/libusb-*.dylib
+
+echo "[*] Cleaning up virtual network interfaces..."
+for iface in $(ifconfig -l 2>/dev/null || true); do
+  if [[ "${iface}" =~ ^feth ]]; then
+    echo "    Tearing down ${iface}..."
+    ifconfig "${iface}" destroy 2>/dev/null || true
+  fi
+done
 
 echo "[+] Uninstalled Svorrent Autonomous Tethering Engine."

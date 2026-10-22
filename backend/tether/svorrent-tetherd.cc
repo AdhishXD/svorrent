@@ -13,6 +13,11 @@ static void handle_signal(int sig) {
     g_running = 0;
 }
 
+static void cleanup_orphans() {
+    size_t removed = 0;
+    tk_cleanup_orphan_interfaces(&removed, NULL);
+}
+
 int main(int argc, char** argv) {
     setlinebuf(stdout);
     setlinebuf(stderr);
@@ -167,6 +172,42 @@ int main(int argc, char** argv) {
                     tk_session_destroy(session);
                     session = NULL;
                     active_interface[0] = '\0';
+                    cleanup_orphans();
+                } else if (status.run_state == TK_RUN_RUNNING) {
+                    // Check whether interface received a valid routable IP (not link-local 169.254.x.x)
+                    tk_net_state_t net_state;
+                    tk_error_t net_err;
+                    memset(&net_state, 0, sizeof(net_state));
+                    memset(&net_err, 0, sizeof(net_err));
+
+                    bool has_valid_ip = false;
+                    if (active_interface[0] != '\0' && tk_net_query(active_interface, &net_state, &net_err) == TK_OK) {
+                        if (net_state.has_address &&
+                            strncmp(net_state.address, "169.254.", 8) != 0 &&
+                            strcmp(net_state.address, "0.0.0.0") != 0 &&
+                            net_state.address[0] != '\0') {
+                            has_valid_ip = true;
+                        }
+                    }
+
+                    if (!has_valid_ip) {
+                        // After 20 seconds without a valid routable IP or if link is down,
+                        // gracefully tear down to avoid stalling the phone's USB connection.
+                        static int s_no_ip_ticks = 0;
+                        s_no_ip_ticks++;
+                        if (s_no_ip_ticks >= 20 || !status.link_up) {
+                            printf("[svorrent-tetherd] No routable IP or link down on %s. Releasing USB device to prevent stall.\n",
+                                   active_interface);
+                            tk_session_stop(session);
+                            tk_session_destroy(session);
+                            session = NULL;
+                            active_interface[0] = '\0';
+                            cleanup_orphans();
+                            s_no_ip_ticks = 0;
+                            sleep(5);
+                            continue;
+                        }
+                    }
                 }
             }
 
@@ -176,6 +217,7 @@ int main(int argc, char** argv) {
                 tk_session_destroy(session);
                 session = NULL;
                 active_interface[0] = '\0';
+                cleanup_orphans();
             }
         }
 
@@ -194,6 +236,7 @@ int main(int argc, char** argv) {
         tk_session_destroy(session);
         session = NULL;
     }
+    cleanup_orphans();
 
     printf("[svorrent-tetherd] Stopped.\n");
     return 0;

@@ -17,7 +17,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 function getTetherDaemonBin() {
-  const privileged = '/Library/PrivilegedHelperTools/com.svorrent.tetherd/svorrent-tetherd';
+  const privilegedSub = '/Library/PrivilegedHelperTools/com.svorrent.tetherd/svorrent-tetherd';
+  if (fs.existsSync(privilegedSub)) return privilegedSub;
+  const privileged = '/Library/PrivilegedHelperTools/svorrent-tetherd';
   if (fs.existsSync(privileged)) return privileged;
   return path.resolve(__dirname, '../bin/svorrent-tetherd');
 }

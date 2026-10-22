@@ -130,28 +130,9 @@ if [ ! -f "$RESOURCES_DIR/app/frontend/dist/index.html" ]; then
     exit 1
 fi
 
-# A one-time administrator approval installs the bundled TetherKit-based helper.
-# The helper watches for Android USB tethering and creates a DHCP-configured
-# feth interface without changing the Mac's existing default route.
-TETHER_HELPER="/Library/PrivilegedHelperTools/com.svorrent.tetherd/svorrent-tetherd"
-TETHER_INSTALLER="$BACKEND_DIR/scripts/install-tetherd.sh"
-MACOS_MAJOR="$(sw_vers -productVersion | cut -d. -f1)"
-if [[ "$MACOS_MAJOR" =~ ^[0-9]+$ ]] && [ "$MACOS_MAJOR" -ge 26 ] && \
-   [ -x "$BACKEND_DIR/bin/svorrent-tetherd" ] && \
-   { [ ! -x "$TETHER_HELPER" ] || ! launchctl print system/com.svorrent.tetherd >/dev/null 2>&1; }; then
-    choice="$(osascript -e 'button returned of (display dialog "Enable Android USB tethering for Svorrent? This installs the bundled TetherKit-based network helper and requires one administrator approval. You can do this later by reopening Svorrent." buttons {"Later", "Enable"} default button "Enable" with icon note)' 2>/dev/null)" || choice=""
-    if [ "$choice" = "Enable" ]; then
-        if ! osascript - "$TETHER_INSTALLER" <<'APPLESCRIPT'
-on run argv
-    set installerPath to item 1 of argv
-    do shell script ("/bin/bash " & quoted form of installerPath) with administrator privileges
-end run
-APPLESCRIPT
-        then
-            osascript -e 'display alert "Android tethering setup failed" message "Svorrent can still run. Reopen it to retry Android USB setup."' || true
-        fi
-    fi
-fi
+# Svorrent does not automatically install privileged root daemons on startup.
+# If Android USB tethering is explicitly desired, the user can install it via:
+# sudo ./backend/scripts/install-tetherd.sh
 
 # 1. If Svorrent backend is already running, immediately open default browser
 backend_ready() {
@@ -249,6 +230,9 @@ open "http://localhost:3001"
 EOF
 chmod +x "$APP_BUNDLE/Contents/MacOS/Svorrent"
 
+echo "==> 5.5. Building native tether helper..."
+make -C "$ROOT_DIR/backend/tether"
+
 echo "==> 6. Copying application assets..."
 cp -R "$ROOT_DIR/frontend/dist"/* "$APP_BUNDLE/Contents/Resources/app/frontend/dist/"
 cp -R "$ROOT_DIR/backend/server.js" "$APP_BUNDLE/Contents/Resources/app/backend/"
@@ -265,6 +249,7 @@ cp -R "$ROOT_DIR/backend/node_modules" "$APP_BUNDLE/Contents/Resources/app/backe
 # Prune heavy unused databases (strip 104MB city-level GeoIP data; keep country data)
 echo "==> 7. Pruning heavy offline city databases..."
 rm -f "$APP_BUNDLE/Contents/Resources/app/backend/node_modules/geoip-lite/data/geoip-city"*
+find "$APP_BUNDLE" -type f \( -name '.DS_Store' -o -name '._*' \) -delete
 
 # Finder metadata copied from a developer checkout can make the app fail to
 # copy out of the mounted DMG (Finder error -36). It is not application data.

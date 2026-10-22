@@ -9,9 +9,9 @@
         <string>/Library/PrivilegedHelperTools/com.svorrent.tetherd/svorrent-tetherd</string>
     </array>
     <key>RunAtLoad</key>
-    <true/>
+    <false/>
     <key>KeepAlive</key>
-    <true/>
+    <false/>
     <key>StandardOutPath</key>
     <string>/var/log/svorrent-tetherd.log</string>
     <key>StandardErrorPath</key>
