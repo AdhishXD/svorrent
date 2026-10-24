@@ -25,22 +25,25 @@ test.describe('Svorrent Web End-to-End Application Checks', () => {
     await expect(page.locator('#nav-search')).toBeVisible();
     await expect(page.locator('#nav-downloads')).toBeVisible();
     await expect(page.locator('#nav-networks')).toBeVisible();
+    await expect(page.locator('#search-input')).toBeVisible();
 
     // 3. Switch to Downloads tab
     await page.click('#nav-downloads');
     await expect(page).toHaveURL(/.*downloads/);
     await expect(page).toHaveTitle(/Downloads · Svorrent/);
+    await expect(page.locator('#open-downloads-folder')).toBeVisible();
 
     // 4. Switch to Networks tab
     await page.click('#nav-networks');
     await expect(page).toHaveURL(/.*networks/);
     await expect(page).toHaveTitle(/Networks · Svorrent/);
-    await expect(page.locator('.networks-container')).toBeVisible();
+    await expect(page.locator('#refresh-networks')).toBeVisible();
 
     // 5. Switch back to Search tab
     await page.click('#nav-search');
     await expect(page).toHaveURL(/\//);
     await expect(page).toHaveTitle('Svorrent');
+    await expect(page.locator('#search-input')).toBeVisible();
 
     // 6. Assert zero runtime errors or unhandled exceptions occurred
     expect(runtimeErrors).toEqual([]);

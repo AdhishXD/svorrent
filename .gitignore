@@ -20,3 +20,4 @@ dist-win/
 scripts/cache/
 scratch/
 backend/bin/svorrent-tetherd
+test-results/
