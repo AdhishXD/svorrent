@@ -30,6 +30,7 @@ import {
   findPrimaryVideoInFolder,
   launchMediaPlayer,
 } from './lib/playability.js';
+import { AutoUpdater } from './lib/updater.js';
 
 function parseClientString(v) {
   if (!v) return 'Unknown';
@@ -330,6 +331,30 @@ app.get('/api/config', (_req, res) => {
     ? `~${DOWNLOAD_DIR.slice(home.length)}`
     : DOWNLOAD_DIR;
   res.json({ downloadDir });
+});
+
+const autoUpdater = new AutoUpdater({
+  currentVersion: '1.0.1',
+  repo: 'sovopr/svorrent',
+});
+autoUpdater.start();
+
+app.get('/api/updater/status', (_req, res) => {
+  res.json(autoUpdater.getStatus());
+});
+
+app.post('/api/updater/check', async (_req, res) => {
+  const status = await autoUpdater.checkForUpdates();
+  res.json(status);
+});
+
+app.post('/api/updater/restart', async (_req, res) => {
+  try {
+    const result = await autoUpdater.applyUpdate();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Keep the configured provider explicit so unavailable indexes do not delay search.
