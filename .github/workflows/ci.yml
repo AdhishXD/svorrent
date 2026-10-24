@@ -1,13 +1,21 @@
 # ==============================================================================
-# Svorrent Continuous Integration (CI) Workflow
+# Svorrent Multi-Platform Continuous Integration (CI) Workflow
 # 
-# This workflow runs automatically on GitHub whenever code is pushed or a PR
-# is created. It guarantees deterministic behavior across platforms (macOS & Linux)
-# by running linting, production bundling, unit tests, hermetic BitTorrent e2e
-# tests, and native macOS Cocoa launcher compilation.
+# Automatically tests Svorrent on every commit across:
+#   - macOS (Apple Silicon & Intel)
+#   - Windows (windows-latest)
+#   - Linux (ubuntu-latest)
+#
+# Runs:
+#   1. Static Oxlint code quality verification
+#   2. React production bundle compilation
+#   3. Security & logic unit tests
+#   4. Hermetic loopback BitTorrent download & SHA-256 integrity test
+#   5. Headless Chromium Browser E2E UI test (verifying tabs, routing, zero errors)
+#   6. Native macOS Cocoa launcher compilation
 # ==============================================================================
 
-name: CI Deterministic Suite
+name: CI Multi-Platform Deterministic Suite
 
 on:
   push:
@@ -20,23 +28,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: Test & Lint (${{ matrix.os }}, Node ${{ matrix.node-version }})
+  core-suite:
+    name: Core Suite (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ ubuntu-latest, macos-latest ]
-        node-version: [ 20.x, 22.x ]
+        os: [ ubuntu-latest, macos-latest, windows-latest ]
 
     steps:
-      - name: 1. Checkout code
+      - name: 1. Checkout repository
         uses: actions/checkout@v4
 
-      - name: 2. Setup Node.js ${{ matrix.node-version }}
+      - name: 2. Setup Node.js 22.x
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 22.x
           cache: 'npm'
           cache-dependency-path: |
             backend/package-lock.json
@@ -66,16 +73,54 @@ jobs:
         working-directory: backend
         run: npm test
 
-      - name: 9. Run Local Hermetic BitTorrent E2E Transfer Test
+      - name: 9. Run Local Hermetic BitTorrent Transfer Test
         working-directory: backend
+        run: npm run test:e2e
+
+  browser-ui-e2e:
+    name: Browser E2E UI (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: core-suite
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest ]
+
+    steps:
+      - name: 1. Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 2. Setup Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: 3. Install Backend Dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: 4. Install Frontend Dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: 5. Install Playwright Chromium Browser
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: 6. Run Browser End-to-End Navigation & Runtime Error Test
+        working-directory: frontend
         run: npm run test:e2e
 
   macos-native:
     name: Build Native macOS Cocoa Launcher
     runs-on: macos-latest
-    needs: test
+    needs: core-suite
     steps:
-      - name: 1. Checkout code
+      - name: 1. Checkout repository
         uses: actions/checkout@v4
 
       - name: 2. Compile Cocoa Dock Launcher

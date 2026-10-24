@@ -13,13 +13,22 @@ test('torrent file paths remain inside their download root', () => {
   }
 });
 
-test('rejects a parent symlink that points outside the download root', () => {
+test('rejects a parent symlink that points outside the download root', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'svorrent-path-test-'));
   try {
-    fs.symlinkSync(os.tmpdir(), path.join(root, 'outside'));
+    try {
+      fs.symlinkSync(os.tmpdir(), path.join(root, 'outside'));
+    } catch (err) {
+      if ((err.code === 'EPERM' || err.code === 'EEXIST') && process.platform === 'win32') {
+        t.skip('Symlinks require elevated developer privileges on Windows');
+        return;
+      }
+      throw err;
+    }
     assert.equal(hasSafeParent(root, path.join(root, 'outside', 'file.mkv')), false);
     assert.equal(hasSafeParent(root, path.join(root, 'file.mkv')), true);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+

@@ -60,7 +60,11 @@ async function closeBackend() {
   backend.kill('SIGTERM');
   await Promise.race([exited, delay(5000)]);
   if (backend.exitCode === null) {
-    backend.kill('SIGKILL');
+    if (process.platform === 'win32') {
+      try { spawnSync('taskkill', ['/pid', String(backend.pid), '/T', '/F']); } catch {}
+    } else {
+      backend.kill('SIGKILL');
+    }
     await Promise.race([exited, delay(2000)]);
   }
 }
@@ -145,8 +149,8 @@ try {
     assert.equal(playback.success, true);
     console.log(`Native player accepted the test clip: ${playback.player}`);
   } catch (err) {
-    if (process.platform === 'linux') {
-      console.log('Skipping native GUI player on headless Linux CI');
+    if (process.platform === 'linux' || process.platform === 'win32') {
+      console.log(`Skipping native GUI player on headless ${process.platform} CI`);
     } else {
       throw err;
     }
