@@ -56,8 +56,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG_NAME="${{ github.ref_name }}"
-          gh release create "$TAG_NAME" \
-            dist-app/Svorrent.dmg \
-            dist-app/SHA256SUMS.txt \
-            --title "$TAG_NAME" \
-            --generate-notes
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            echo "Release $TAG_NAME already exists; uploading assets..."
+            gh release upload "$TAG_NAME" \
+              dist-app/Svorrent.dmg \
+              dist-app/SHA256SUMS.txt \
+              --clobber
+          else
+            gh release create "$TAG_NAME" \
+              dist-app/Svorrent.dmg \
+              dist-app/SHA256SUMS.txt \
+              --title "$TAG_NAME" \
+              --generate-notes
+          fi
