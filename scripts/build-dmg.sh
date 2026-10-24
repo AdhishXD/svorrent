@@ -76,7 +76,8 @@ iconutil -c icns "$ICON_TMP/Svorrent.iconset" -o "$APP_BUNDLE/Contents/Resources
 rm -rf "$ICON_TMP"
 
 echo "==> 4. Writing Info.plist..."
-cat << 'EOF' > "$APP_BUNDLE/Contents/Info.plist"
+APP_VERSION="$(node -p "require('$ROOT_DIR/backend/package.json').version" 2>/dev/null || echo "1.0.2")"
+cat << EOF > "$APP_BUNDLE/Contents/Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -92,9 +93,9 @@ cat << 'EOF' > "$APP_BUNDLE/Contents/Info.plist"
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.2</string>
+    <string>${APP_VERSION}</string>
     <key>CFBundleVersion</key>
-    <string>1.0.2</string>
+    <string>${APP_VERSION}</string>
     <key>LSMinimumSystemVersion</key>
     <string>11.0</string>
     <key>NSHighResolutionCapable</key>

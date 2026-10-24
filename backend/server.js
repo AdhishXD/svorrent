@@ -333,8 +333,13 @@ app.get('/api/config', (_req, res) => {
   res.json({ downloadDir });
 });
 
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const pkg = require('./package.json');
+const currentVersion = pkg.version || '1.0.2';
+
 const autoUpdater = new AutoUpdater({
-  currentVersion: '1.0.2',
+  currentVersion,
   repo: 'sovopr/svorrent',
 });
 autoUpdater.start();
