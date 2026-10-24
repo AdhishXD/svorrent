@@ -20,6 +20,7 @@ import { TorrentArchive } from './lib/archive.js';
 import { FolderScanner } from './lib/scanner.js';
 import { resolveDoH } from './lib/doh.js';
 import { cleanMagnet, extractInfoHash, waitForInfoHash, setTorrentPaused } from './lib/torrents.js';
+import { createSettingsManager } from './lib/settings.js';
 import { localAccess } from './lib/local-access.js';
 import { childPath, hasSafeParent } from './lib/safe-path.js';
 import geoip from 'geoip-lite';
@@ -196,6 +197,7 @@ if (!Wire.nativeRC4) {
 
 const networkManager = new NetworkManager(() => client);
 const archive = new TorrentArchive(DATA_DIR);
+const settingsManager = createSettingsManager(DATA_DIR);
 const folderScanner = new FolderScanner(DOWNLOAD_DIR, () => client, () => archive);
 
 // ---------------------------------------------------------------------------
@@ -330,7 +332,43 @@ app.get('/api/config', (_req, res) => {
   const downloadDir = DOWNLOAD_DIR.startsWith(`${home}${path.sep}`)
     ? `~${DOWNLOAD_DIR.slice(home.length)}`
     : DOWNLOAD_DIR;
-  res.json({ downloadDir });
+  res.json({ downloadDir, settings: settingsManager.get() });
+});
+
+app.get('/api/settings', (_req, res) => {
+  res.json(settingsManager.get());
+});
+
+app.post('/api/settings', (req, res) => {
+  const { autoStopSeeding } = req.body || {};
+  const updated = settingsManager.update({
+    ...(typeof autoStopSeeding === 'boolean' ? { autoStopSeeding } : {}),
+  });
+
+  if (updated.autoStopSeeding && client?.torrents) {
+    for (const t of client.torrents) {
+      if (t.done && !t.destroyed && !t._pausedManually) {
+        setTorrentPaused(t, true);
+      }
+    }
+    saveSession();
+  }
+
+  res.json(updated);
+});
+
+app.post('/api/torrents/stop-all-seeding', (_req, res) => {
+  let count = 0;
+  if (client?.torrents) {
+    for (const t of client.torrents) {
+      if (t.done && !t.destroyed && !t._pausedManually) {
+        setTorrentPaused(t, true);
+        count++;
+      }
+    }
+    saveSession();
+  }
+  res.json({ success: true, count });
 });
 
 import { createRequire } from 'node:module';
@@ -446,6 +484,10 @@ function setupTorrentHooks(torrent) {
   torrent.on('done', () => {
     console.log(`[torrent done] Download completed: ${torrent.name || torrent.infoHash}`);
     archive.save(torrent);
+    if (settingsManager.get().autoStopSeeding) {
+      console.log(`[torrent done] autoStopSeeding enabled - stopping seeding for: ${torrent.name || torrent.infoHash}`);
+      setTorrentPaused(torrent, true);
+    }
     saveSession();
   });
 }

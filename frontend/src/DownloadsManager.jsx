@@ -17,7 +17,10 @@ function statusOf(t) {
     if (t.isRecoverable) return { key: 'halfway', label: 'Incomplete · On disk' };
     return { key: 'local', label: 'On disk' };
   }
-  if (t.done) return { key: 'done', label: 'Completed' };
+  if (t.done) {
+    if (t.paused) return { key: 'done-paused', label: 'Completed · Stopped' };
+    return { key: 'done', label: 'Completed · Seeding' };
+  }
   if (t.paused) return { key: 'paused', label: 'Paused' };
   if (!t.ready) return { key: 'meta', label: 'Fetching metadata' };
   if (!t.numPeers) return { key: 'stalled', label: 'Looking for peers' };
@@ -26,6 +29,8 @@ function statusOf(t) {
 
 export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoSearch }) {
   const [downloadDir, setDownloadDir] = useState(null);
+  const [autoStopSeeding, setAutoStopSeeding] = useState(false);
+  const [togglingSettings, setTogglingSettings] = useState(false);
   const [filter, setFilter] = useState('all');
   const [detailsId, setDetailsId] = useState(null);
   const [swarmTorrent, setSwarmTorrent] = useState(null);
@@ -45,9 +50,33 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
     let active = true;
     apiGet('/config').then((config) => {
       if (active && typeof config.downloadDir === 'string') setDownloadDir(config.downloadDir);
+      if (active && config?.settings && typeof config.settings.autoStopSeeding === 'boolean') {
+        setAutoStopSeeding(config.settings.autoStopSeeding);
+      }
     }).catch(() => {});
     return () => { active = false; };
   }, []);
+
+  const toggleAutoStopSeeding = async () => {
+    if (togglingSettings) return;
+    const nextVal = !autoStopSeeding;
+    setAutoStopSeeding(nextVal);
+    setTogglingSettings(true);
+    try {
+      await apiPost('/settings', { autoStopSeeding: nextVal });
+      if (nextVal) {
+        notify('Auto-stop seeding enabled · Uploading stopped on completed downloads');
+        refresh();
+      } else {
+        notify('Auto-stop seeding disabled · Completed downloads will continue seeding');
+      }
+    } catch (err) {
+      setAutoStopSeeding(!nextVal);
+      notify(err.message || 'Failed to update settings', 'error');
+    } finally {
+      setTogglingSettings(false);
+    }
+  };
 
   const location = downloadDir || 'the download folder';
 
@@ -86,9 +115,15 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
     if (t.isFolderFile && t.isRecoverable) {
       return resumeRecoverable(t);
     }
-    setTorrents((prev) => prev.map((x) => (x.infoHash === t.infoHash ? { ...x, paused: !t.paused } : x)));
+    const nextPaused = !t.paused;
+    setTorrents((prev) => prev.map((x) => (x.infoHash === t.infoHash ? { ...x, paused: nextPaused } : x)));
     try {
       await apiPost(`/torrent/${t.infoHash}/${t.paused ? 'resume' : 'pause'}`);
+      if (t.done) {
+        notify(nextPaused ? `Stopped seeding “${t.name}”` : `Resumed seeding “${t.name}”`);
+      } else {
+        notify(nextPaused ? `Paused “${t.name}”` : `Resumed “${t.name}”`);
+      }
     } catch (err) {
       notify(err.message, 'error');
     }
@@ -238,6 +273,23 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
             </button>
           ))}
         </div>
+        <div className="toolbar-actions">
+          <label className="toggle-setting" title="When enabled, completed downloads automatically stop uploading so they don't consume bandwidth or mobile data">
+            <span className="toggle-setting-label">Stop seeding when done</span>
+            <button
+              type="button"
+              role="switch"
+              id="toggle-auto-stop-seeding"
+              aria-checked={autoStopSeeding}
+              className={`btn-toggle ${autoStopSeeding ? 'is-active' : ''}`}
+              onClick={toggleAutoStopSeeding}
+              disabled={togglingSettings}
+              aria-label="Toggle auto-stop seeding when complete"
+            >
+              <span className="toggle-thumb" />
+            </button>
+          </label>
+        </div>
       </div>
 
       {/* Downloads Table */}
@@ -336,10 +388,10 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
                       {isFolder || t.done ? '—' : formatSpeed(t.downloadSpeed)}
                     </td>
                     <td className="col-num mono col-hide-sm muted">
-                      {isFolder ? '—' : formatSpeed(t.uploadSpeed)}
+                      {isFolder || (t.done && t.paused) ? '—' : formatSpeed(t.uploadSpeed)}
                     </td>
                     <td className="col-num mono col-hide-md muted">
-                      {isFolder ? '—' : (t.numPeers || 0)}
+                      {isFolder || (t.done && t.paused) ? '—' : (t.numPeers || 0)}
                     </td>
                     <td className="col-num mono muted">
                       {isFolder || t.done || t.paused ? '—' : formatEta(t.timeRemaining)}
@@ -395,7 +447,16 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
                         ) : (
                           <>
                             <div className="dl-action-primary">
-                              {!t.done && (
+                              {t.done ? (
+                                <button
+                                  className="btn btn-outline btn-sm"
+                                  onClick={() => runAction(t.infoHash, () => togglePause(t))}
+                                  disabled={pending.has(t.infoHash)}
+                                  title={t.paused ? 'Resume seeding this completed download' : 'Stop seeding and uploading this download'}
+                                >
+                                  <Icon name={t.paused ? 'play' : 'pause'} size={13} /> {t.paused ? 'Seed' : 'Stop Seeding'}
+                                </button>
+                              ) : (
                                 <button
                                   className="btn btn-outline btn-sm"
                                   onClick={() => runAction(t.infoHash, () => togglePause(t))}

@@ -424,6 +424,31 @@ a {
   font-size: 13px;
 }
 
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.toggle-setting {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.toggle-setting-label {
+  font-size: 12px;
+  color: var(--text-2);
+  font-weight: 500;
+  transition: color 0.12s;
+}
+
+.toggle-setting:hover .toggle-setting-label {
+  color: var(--text);
+}
+
 .notice {
   padding: 10px 12px;
   border-radius: var(--radius);
