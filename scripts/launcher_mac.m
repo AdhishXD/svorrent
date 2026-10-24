@@ -222,11 +222,31 @@ static BOOL isServerListening(int port) {
     return dockMenu;
 }
 
-- (void)applicationWillTerminate:(NSNotification *)aNotification {
-    if (self.backendTask && [self.backendTask isRunning]) {
-        NSLog(@"[Svorrent] Terminating backend daemon...");
-        [self.backendTask terminate];
+static void killBackendProcess(NSTask *task) {
+    if (task && [task isRunning]) {
+        [task terminate];
     }
+    // Ensure any process on port 3001 is cleanly stopped
+    NSTask *killTask = [[NSTask alloc] init];
+    killTask.launchPath = @"/bin/sh";
+    killTask.arguments = @[@"-c", @"lsof -ti :3001 | xargs kill -15 2>/dev/null"];
+    @try {
+        [killTask launch];
+        [killTask waitUntilExit];
+    } @catch (NSException *e) {}
+
+    // Clean up launchd job if any
+    uid_t uid = getuid();
+    NSString *jobTarget = [NSString stringWithFormat:@"gui/%d/com.sovopr.svorrent.backend", uid];
+    NSTask *bootout = [[NSTask alloc] init];
+    bootout.launchPath = @"/bin/launchctl";
+    bootout.arguments = @[@"bootout", jobTarget];
+    @try { [bootout launch]; [bootout waitUntilExit]; } @catch (NSException *e) {}
+}
+
+- (void)applicationWillTerminate:(NSNotification *)aNotification {
+    NSLog(@"[Svorrent] Terminating backend daemon...");
+    killBackendProcess(self.backendTask);
 }
 
 @end
