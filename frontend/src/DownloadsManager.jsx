@@ -6,9 +6,7 @@ import { Icon } from './Icon';
 import { apiGet, apiPost, formatBytes, formatEta, formatSpeed } from './lib';
 
 const FILTERS = [
-  { key: 'all', label: 'All' },
   { key: 'active', label: 'Active' },
-  { key: 'paused', label: 'Paused' },
   { key: 'completed', label: 'Completed' },
 ];
 
@@ -31,7 +29,7 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
   const [downloadDir, setDownloadDir] = useState(null);
   const [autoStopSeeding, setAutoStopSeeding] = useState(false);
   const [togglingSettings, setTogglingSettings] = useState(false);
-  const [filter, setFilter] = useState('all');
+  const [filter, setFilter] = useState('active');
   const [detailsId, setDetailsId] = useState(null);
   const [swarmTorrent, setSwarmTorrent] = useState(null);
   const [resumeModalOpen, setResumeModalOpen] = useState(false);
@@ -98,17 +96,13 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
   }, [torrents]);
 
   const counts = {
-    all: torrents.length,
-    active: torrents.filter((t) => !t.isFolderFile && !t.done && !t.paused).length,
-    paused: torrents.filter((t) => t.paused).length,
+    active: torrents.filter((t) => !t.done).length,
     completed: torrents.filter((t) => t.done).length,
   };
 
   const visible = torrents.filter((t) => {
-    if (filter === 'active') return !t.isFolderFile && !t.done && !t.paused;
-    if (filter === 'paused') return t.paused;
     if (filter === 'completed') return t.done;
-    return true;
+    return !t.done;
   });
 
   const togglePause = async (t) => {
@@ -217,7 +211,7 @@ export function DownloadsManager({ torrents, setTorrents, refresh, notify, onGoS
       setMagnetInput('');
       setResumeModalOpen(false);
       refresh();
-      setFilter('all');
+      setFilter('active');
     } catch (err) {
       notify(err.message || 'Could not resume with magnet', 'error');
     } finally {
