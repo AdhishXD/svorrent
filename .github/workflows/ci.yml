@@ -89,6 +89,54 @@ jobs:
         working-directory: backend
         run: npm run test:e2e
 
+      - name: 10. Cold-start Windows desktop launcher
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vs) { throw 'Visual C++ build tools are missing' }
+          $vcvars = Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat'
+          $command = 'call "' + $vcvars + '" >nul && cl /nologo /O2 scripts\launcher.c /Fe:Svorrent.exe /link /SUBSYSTEM:WINDOWS ws2_32.lib shell32.lib user32.lib'
+          cmd /c $command
+          if ($LASTEXITCODE -ne 0) { throw 'Windows launcher compilation failed' }
+
+          $env:SVORRENT_DISABLE_PUBLIC_DISCOVERY = '1'
+          $env:SVORRENT_DATA_DIR = Join-Path $env:RUNNER_TEMP 'svorrent-data'
+          $env:SVORRENT_DOWNLOAD_DIR = Join-Path $env:RUNNER_TEMP 'svorrent-downloads'
+          $launcher = Start-Process -FilePath (Join-Path $PWD 'Svorrent.exe') -WorkingDirectory $PWD -PassThru
+          $deadline = [DateTime]::UtcNow.AddSeconds(100)
+          $ready = $false
+          try {
+            do {
+              try {
+                $response = Invoke-WebRequest -Uri 'http://127.0.0.1:3001/api/health' -TimeoutSec 2
+                if ($response.StatusCode -eq 200) { $ready = $true; break }
+              } catch {}
+              if ($launcher.HasExited -and $launcher.ExitCode -ne 0) {
+                throw "Launcher exited early with code $($launcher.ExitCode)"
+              }
+              Start-Sleep -Milliseconds 500
+            } while ([DateTime]::UtcNow -lt $deadline)
+            if (-not $ready) { throw 'Backend did not become ready within 100 seconds' }
+            if (-not $launcher.WaitForExit(10000) -or $launcher.ExitCode -ne 0) {
+              throw 'Launcher did not exit successfully after the backend became ready'
+            }
+            $server = Get-NetTCPConnection -LocalPort 3001 -State Listen | Select-Object -First 1
+            $second = Start-Process -FilePath (Join-Path $PWD 'Svorrent.exe') -WorkingDirectory $PWD -PassThru
+            if (-not $second.WaitForExit(10000) -or $second.ExitCode -ne 0) {
+              throw 'Second launch did not reuse the running backend'
+            }
+            $after = Get-NetTCPConnection -LocalPort 3001 -State Listen | Select-Object -First 1
+            if ($after.OwningProcess -ne $server.OwningProcess) {
+              throw 'Second launch replaced the running backend'
+            }
+          } finally {
+            $server = Get-NetTCPConnection -LocalPort 3001 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($server) { Stop-Process -Id $server.OwningProcess -Force }
+            if (-not $launcher.HasExited) { Stop-Process -Id $launcher.Id -Force }
+          }
+
   browser-ui-e2e:
     name: Browser E2E UI (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
