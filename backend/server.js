@@ -377,7 +377,7 @@ app.post('/api/torrents/stop-all-seeding', (_req, res) => {
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const pkg = require('./package.json');
-const currentVersion = pkg.version || '1.0.2';
+const currentVersion = pkg.version || '1.0.3';
 
 const autoUpdater = new AutoUpdater({
   currentVersion,

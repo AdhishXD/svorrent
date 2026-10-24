@@ -1,8 +1,8 @@
-Unicode true
+Target x86-ansi
 !include "MUI2.nsh"
 
 Name "Svorrent"
-Caption "Svorrent 1.0.1 Setup"
+Caption "Svorrent Setup"
 OutFile "Svorrent-Setup.exe"
 InstallDir "$LOCALAPPDATA\Programs\Svorrent"
 InstallDirRegKey HKCU "Software\Svorrent" "InstallPath"
@@ -39,7 +39,7 @@ Section "Svorrent Core" SecCore
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Svorrent" "DisplayName" "Svorrent"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Svorrent" "DisplayIcon" "$INSTDIR\Svorrent.exe"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Svorrent" "UninstallString" "$INSTDIR\Uninstall.exe"
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Svorrent" "DisplayVersion" "1.0.1"
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Svorrent" "DisplayVersion" "1.0.3"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Svorrent" "Publisher" "Svorrent Team"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Svorrent" "HelpLink" "https://github.com/sovopr/svorrent"
 

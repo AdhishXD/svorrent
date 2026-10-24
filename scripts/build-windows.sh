@@ -25,8 +25,13 @@ rm -rf "$BUILD_DIR"
 mkdir -p "$STAGING_DIR/backend"
 mkdir -p "$STAGING_DIR/frontend/dist"
 
-echo "==> 3. Generating Windows multi-resolution icon (svorrent.ico)..."
-python3 - << EOF
+PYTHON_BIN="python3"
+if [ -x "/usr/bin/python3" ] && /usr/bin/python3 -c "import PIL" 2>/dev/null; then
+    PYTHON_BIN="/usr/bin/python3"
+fi
+
+if "$PYTHON_BIN" -c "import PIL" 2>/dev/null; then
+    "$PYTHON_BIN" - << EOF
 import subprocess
 from PIL import Image
 
@@ -37,6 +42,11 @@ img.save("$BUILD_DIR/svorrent.ico", format="ICO", sizes=sizes)
 img.save("$STAGING_DIR/svorrent.ico", format="ICO", sizes=sizes)
 print("Generated svorrent.ico with sizes:", sizes)
 EOF
+else
+    cp "$ROOT_DIR/frontend/public/favicon.ico" "$BUILD_DIR/svorrent.ico"
+    cp "$ROOT_DIR/frontend/public/favicon.ico" "$STAGING_DIR/svorrent.ico"
+    echo "Using existing favicon.ico as svorrent.ico"
+fi
 
 echo "==> 4. Ensuring Windows x64 native binary for node-datachannel..."
 WIN_NODE_DATACHANNEL="$CACHE_DIR/node_datachannel_win32_x64.node"

@@ -76,7 +76,7 @@ iconutil -c icns "$ICON_TMP/Svorrent.iconset" -o "$APP_BUNDLE/Contents/Resources
 rm -rf "$ICON_TMP"
 
 echo "==> 4. Writing Info.plist..."
-APP_VERSION="$(node -p "require('$ROOT_DIR/backend/package.json').version" 2>/dev/null || echo "1.0.2")"
+APP_VERSION="$(node -p "require('$ROOT_DIR/backend/package.json').version" 2>/dev/null || echo "1.0.3")"
 cat << EOF > "$APP_BUNDLE/Contents/Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
