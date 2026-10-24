@@ -1,0 +1,85 @@
+# ==============================================================================
+# Svorrent Continuous Integration (CI) Workflow
+# 
+# This workflow runs automatically on GitHub whenever code is pushed or a PR
+# is created. It guarantees deterministic behavior across platforms (macOS & Linux)
+# by running linting, production bundling, unit tests, hermetic BitTorrent e2e
+# tests, and native macOS Cocoa launcher compilation.
+# ==============================================================================
+
+name: CI Deterministic Suite
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test & Lint (${{ matrix.os }}, Node ${{ matrix.node-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, macos-latest ]
+        node-version: [ 20.x, 22.x ]
+
+    steps:
+      - name: 1. Checkout code
+        uses: actions/checkout@v4
+
+      - name: 2. Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: 3. Install Frontend Dependencies (Hermetic)
+        working-directory: frontend
+        run: npm ci
+
+      - name: 4. Static Lint Check (Oxlint)
+        working-directory: frontend
+        run: npm run lint
+
+      - name: 5. Build React Web Application (Vite)
+        working-directory: frontend
+        run: npm run build
+
+      - name: 6. Run Frontend Unit Tests
+        working-directory: frontend
+        run: npm test
+
+      - name: 7. Install Backend Dependencies (Hermetic)
+        working-directory: backend
+        run: npm ci
+
+      - name: 8. Run Backend Security & Logic Unit Tests
+        working-directory: backend
+        run: npm test
+
+      - name: 9. Run Local Hermetic BitTorrent E2E Transfer Test
+        working-directory: backend
+        run: npm run test:e2e
+
+  macos-native:
+    name: Build Native macOS Cocoa Launcher
+    runs-on: macos-latest
+    needs: test
+    steps:
+      - name: 1. Checkout code
+        uses: actions/checkout@v4
+
+      - name: 2. Compile Cocoa Dock Launcher
+        run: |
+          clang -O2 -fobjc-arc -framework Cocoa scripts/launcher_mac.m -o scripts/Svorrent
+          file scripts/Svorrent
+          codesign --verify scripts/Svorrent || true
