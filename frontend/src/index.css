@@ -1937,7 +1937,7 @@ a {
 .swarm-modal-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 16px;
   flex-wrap: wrap;
 }
@@ -2396,7 +2396,7 @@ a {
 }
 
 .swarm-peers-table .col-iface {
-  width: 82px;
+  width: 98px;
   text-align: center;
 }
 
@@ -2505,11 +2505,17 @@ a {
 }
 
 .channel-badge {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-size: 11px;
+  font-weight: 500;
   padding: 2px 7px;
   border-radius: 4px;
   font-family: var(--mono);
+  white-space: nowrap;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
 }
 
 .badge-wifi {
@@ -2518,10 +2524,29 @@ a {
   border: 1px solid rgba(56, 189, 248, 0.28);
 }
 
-.badge-tether {
+.badge-tether,
+.badge-cellular {
   background: rgba(16, 185, 129, 0.12);
   color: #10b981;
   border: 1px solid rgba(16, 185, 129, 0.28);
+}
+
+.badge-ethernet {
+  background: rgba(201, 162, 74, 0.12);
+  color: #c9a24a;
+  border: 1px solid rgba(201, 162, 74, 0.28);
+}
+
+.badge-bridge {
+  background: rgba(245, 158, 11, 0.12);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.28);
+}
+
+.badge-other {
+  background: var(--surface-2);
+  color: var(--text-2);
+  border: 1px solid var(--border);
 }
 
 .active-down {

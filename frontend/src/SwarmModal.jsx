@@ -18,6 +18,53 @@ function getIfaceColor(type) {
   return INTERFACE_COLORS[type] || INTERFACE_COLORS.other;
 }
 
+function formatPeerIface(p, allInterfaces = []) {
+  const name = p.networkInterface || p.networkDevice || '';
+  const type = p.networkType || (p.networkDevice === 'feth0' ? 'cellular' : 'wifi');
+
+  if (type === 'wifi' || /^wi-?fi/i.test(name)) {
+    return 'Wi-Fi';
+  }
+
+  if (type === 'cellular' || /tether|rndis|feth/i.test(name) || /tether|rndis|feth/i.test(p.networkDevice || '')) {
+    const cellularCount = allInterfaces.filter((i) => i.type === 'cellular').length;
+    if (cellularCount > 1) {
+      const match = name.match(/\(([^)]+)\)/);
+      if (match) {
+        const shortDevice = match[1].replace(/samsung\s+/i, '').replace(/google\s+/i, '');
+        return `USB (${shortDevice})`;
+      }
+    }
+    return 'USB Tether';
+  }
+
+  if (type === 'ethernet' || /ethernet|lan/i.test(name)) {
+    return 'Ethernet';
+  }
+
+  if (type === 'bridge' || /bridge/i.test(name)) {
+    return 'Bridge';
+  }
+
+  return name.length > 12 ? `${name.slice(0, 10)}…` : (name || 'Default');
+}
+
+function getPeerIfaceBadgeClass(p) {
+  const type = p.networkType || (p.networkDevice === 'feth0' ? 'cellular' : 'wifi');
+  switch (type) {
+    case 'wifi':
+      return 'badge-wifi';
+    case 'cellular':
+      return 'badge-tether';
+    case 'ethernet':
+      return 'badge-ethernet';
+    case 'bridge':
+      return 'badge-bridge';
+    default:
+      return 'badge-other';
+  }
+}
+
 export function SwarmModal({ torrent, onClose }) {
   const [data, setData] = useState({
     peers: [],
@@ -26,7 +73,6 @@ export function SwarmModal({ torrent, onClose }) {
   });
   const [viewMode, setViewMode] = useState('matrix'); // 'matrix' (default primary view) or 'map'
   const [selectedCountry, setSelectedCountry] = useState(null);
-  const [selectedInterface, setSelectedInterface] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState('downSpeed');
   const [error, setError] = useState('');
@@ -66,15 +112,9 @@ export function SwarmModal({ torrent, onClose }) {
   const summary = data.summary || { totalPeers: 0, countriesCount: 0, countries: [], interfaces: [] };
   const pieceTelemetry = data.pieceTelemetry;
 
-  // Filter peers based on interface, country, and search query
+  // Filter peers based on country and search query
   const filteredPeers = useMemo(() => {
     return peers.filter((p) => {
-      if (selectedInterface !== 'all') {
-        if (p.networkDevice !== selectedInterface && p.networkType !== selectedInterface) {
-          return false;
-        }
-      }
-
       if (selectedCountry) {
         const pCountry = p.geo?.countryCode?.toLowerCase();
         if (pCountry !== selectedCountry.toLowerCase()) {
@@ -96,7 +136,7 @@ export function SwarmModal({ torrent, onClose }) {
 
       return true;
     });
-  }, [peers, selectedInterface, selectedCountry, searchQuery]);
+  }, [peers, selectedCountry, searchQuery]);
 
   // Sort peers
   const sortedPeers = useMemo(() => {
@@ -197,52 +237,22 @@ export function SwarmModal({ torrent, onClose }) {
         {/* Modal Scrollable Body */}
         <div className="swarm-modal-body">
           {error && <p className="notice notice-error" role="status">{error} Peer data may be out of date.</p>}
-          {/* Controls Bar: Scalable Network Channels Segmented Control */}
-          <div className="swarm-modal-toolbar">
-            <div className="segmented-control" role="group" aria-label="Interface filter">
-              {((summary.interfaces || []).length > 1 || (summary.interfaces || []).length === 0) && (
-                <button
-                  className={`segment-btn ${selectedInterface === 'all' ? 'is-active' : ''}`}
-                  onClick={() => setSelectedInterface('all')}
-                  aria-pressed={selectedInterface === 'all'}
-                >
-                  All interfaces ({peers.length})
-                </button>
-              )}
-
-              {(summary.interfaces || []).map((iface) => {
-                const color = getIfaceColor(iface.type);
-                const hasMultiple = (summary.interfaces || []).length > 1;
-                const isSelected = hasMultiple
-                  ? selectedInterface === iface.device
-                  : (selectedInterface === 'all' || selectedInterface === iface.device);
-                return (
-                  <button
-                    key={iface.device}
-                    className={`segment-btn ${isSelected ? 'is-active' : ''}`}
-                    onClick={() => setSelectedInterface(iface.device)}
-                    aria-pressed={isSelected}
-                  >
-                    <span className="chan-dot" style={{ backgroundColor: color }} />
-                    <span className="chan-label">{iface.name}</span>
-                    <span className="chan-count mono">({iface.count})</span>
-                  </button>
-                );
-              })}
+          {/* Active Network Channels Throughput Legend */}
+          {(summary.interfaces || []).length > 0 && (
+            <div className="swarm-modal-toolbar">
+              <div className="map-legend">
+                {(summary.interfaces || []).map((iface) => {
+                  const color = getIfaceColor(iface.type);
+                  return (
+                    <span key={iface.device} className="legend-entry">
+                      <span className="legend-dot" style={{ backgroundColor: color }} />
+                      <span>{iface.name} ({formatSpeed(iface.downSpeed)})</span>
+                    </span>
+                  );
+                })}
+              </div>
             </div>
-
-            <div className="map-legend">
-              {(summary.interfaces || []).map((iface) => {
-                const color = getIfaceColor(iface.type);
-                return (
-                  <span key={iface.device} className="legend-entry">
-                    <span className="legend-dot" style={{ backgroundColor: color }} />
-                    <span>{iface.name} ({formatSpeed(iface.downSpeed)})</span>
-                  </span>
-                );
-              })}
-            </div>
-          </div>
+          )}
 
           {/* VIEW MODE 1: TELEMETRY MATRIX (DEFAULT PRIMARY ENGINEERING VIEW) */}
           {viewMode === 'matrix' ? (
@@ -409,7 +419,6 @@ export function SwarmModal({ torrent, onClose }) {
                   peers={peers}
                   selectedCountry={selectedCountry}
                   onSelectCountry={setSelectedCountry}
-                  selectedInterface={selectedInterface}
                 />
               </div>
 
@@ -525,10 +534,11 @@ export function SwarmModal({ torrent, onClose }) {
                   ) : (
                     sortedPeers.map((p, idx) => {
                       const cCode = p.geo?.countryCode;
-                      const isTether = p.networkDevice === 'feth0' || p.networkType === 'cellular';
                       const proto = p.protocol || 'TCP';
                       const addrText = formatPeerAddress(p.ip, p.port);
                       const cName = countryName(cCode);
+                      const ifaceLabel = formatPeerIface(p, summary.interfaces || []);
+                      const ifaceTooltip = `${p.networkInterface || p.networkDevice || 'Unknown'}${p.networkDevice ? ` (${p.networkDevice})` : ''}`;
                       return (
                         <tr key={`${p.ip}:${p.port}-${idx}`}>
                           <td className="col-country">
@@ -554,8 +564,11 @@ export function SwarmModal({ torrent, onClose }) {
                           </td>
 
                           <td className="col-iface">
-                            <span className={`channel-badge ${isTether ? 'badge-tether' : 'badge-wifi'}`}>
-                              {p.networkInterface || p.networkDevice || 'Unknown'}
+                            <span
+                              className={`channel-badge ${getPeerIfaceBadgeClass(p)}`}
+                              title={ifaceTooltip}
+                            >
+                              {ifaceLabel}
                             </span>
                           </td>
 
