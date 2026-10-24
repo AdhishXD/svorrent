@@ -281,6 +281,9 @@ async function restoreSession() {
         if (entry.paused) {
           torrent._pausedManually = true;
         }
+        if (Array.isArray(entry.knownPeers) && entry.knownPeers.length > 0) {
+          torrent._knownPeers = new Set(entry.knownPeers);
+        }
         setupTorrentHooks(torrent);
       }
     } catch (err) {
@@ -440,11 +443,32 @@ function setupTorrentHooks(torrent) {
       wire.destroy();
       return;
     }
+    if (wire.remoteAddress && wire.remotePort) {
+      if (!torrent._knownPeers) torrent._knownPeers = new Set();
+      if (torrent._knownPeers.size < 150) {
+        torrent._knownPeers.add(`${wire.remoteAddress}:${wire.remotePort}`);
+      }
+    }
     try {
       if (typeof wire.unchoke === 'function') wire.unchoke();
       if (typeof wire.interested === 'function') wire.interested();
     } catch {}
   });
+
+  const recordDiscoveredPeers = () => {
+    if (torrent.discovery) {
+      torrent.discovery.on('peer', (peer) => {
+        if (typeof peer === 'string' && peer.includes(':')) {
+          if (!torrent._knownPeers) torrent._knownPeers = new Set();
+          if (torrent._knownPeers.size < 150) {
+            torrent._knownPeers.add(peer);
+          }
+        }
+      });
+    }
+  };
+  if (torrent.discovery) recordDiscoveredPeers();
+  else torrent.once('infoHash', recordDiscoveredPeers);
 
   torrent.once('ready', () => {
     // Sequential Strategy: commits pieces to disk and bitfield in order so restarts/failures resume seamlessly
