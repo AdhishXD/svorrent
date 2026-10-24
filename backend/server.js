@@ -334,7 +334,7 @@ app.get('/api/config', (_req, res) => {
 });
 
 const autoUpdater = new AutoUpdater({
-  currentVersion: '1.0.1',
+  currentVersion: '1.0.2',
   repo: 'sovopr/svorrent',
 });
 autoUpdater.start();

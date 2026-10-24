@@ -22,9 +22,9 @@ Svorrent uses a local web interface. Desktop launchers start the backend and ope
 
 | Platform | Package | Size | Description |
 | :--- | :--- | :--- | :--- |
-| **Windows (x64)** | [**`Svorrent-Setup.exe`**](https://github.com/sovopr/svorrent/releases/download/v1.0.1/Svorrent-Setup.exe) | **9.9 MB** | Installer with Desktop & Start Menu shortcuts. |
-| **Windows (x64)** | [**`Svorrent-Windows-x64-Portable.zip`**](https://github.com/sovopr/svorrent/releases/download/v1.0.1/Svorrent-Windows-x64-Portable.zip) | **20.3 MB** | Standalone portable archive. Unzip anywhere and launch `Svorrent.exe`. |
-| **macOS (Apple Silicon)** | [**`Svorrent.dmg`**](https://github.com/sovopr/svorrent/releases/download/v1.0.1/Svorrent.dmg) | **19.6 MB** | Native Apple Silicon disk image. Drag `Svorrent.app` into `/Applications`. |
+| **Windows (x64)** | [**`Svorrent-Setup.exe`**](https://github.com/sovopr/svorrent/releases/latest/download/Svorrent-Setup.exe) | **9.9 MB** | Installer with Desktop & Start Menu shortcuts. |
+| **Windows (x64)** | [**`Svorrent-Windows-x64-Portable.zip`**](https://github.com/sovopr/svorrent/releases/latest/download/Svorrent-Windows-x64-Portable.zip) | **20.3 MB** | Standalone portable archive. Unzip anywhere and launch `Svorrent.exe`. |
+| **macOS (Apple Silicon)** | [**`Svorrent.dmg`**](https://github.com/sovopr/svorrent/releases/latest/download/Svorrent.dmg) | **20.0 MB** | Native Apple Silicon disk image. Drag `Svorrent.app` into `/Applications`. |
 
 The macOS package is arm64-only; an Intel Mac build is not currently available.
 
