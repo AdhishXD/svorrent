@@ -73,6 +73,17 @@ async function getMacHardwarePortNames() {
     }
   } catch {}
 
+  // Detect dynamic Apple USB NCM network interfaces (iPhone / iPad USB tethering)
+  try {
+    const { stdout } = await execAsync('ioreg -r -n AppleUSBNCM11Data -l');
+    const matches = [...stdout.matchAll(/"BSD Name"\s*=\s*"([^"]+)"/g)].map((m) => m[1]);
+    for (const bsdName of matches) {
+      if (bsdName.startsWith('en') && !map.has(bsdName)) {
+        map.set(bsdName, 'iPhone USB');
+      }
+    }
+  } catch {}
+
   return map;
 }
 
