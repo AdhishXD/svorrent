@@ -99,17 +99,20 @@ export class NetworkManager {
     this.baseMaxConns = this.getClient()?.maxConns || 120;
     this.stats = new Map(); // id -> { downloaded: 0, uploaded: 0, currentDown: 0, currentUp: 0, peers: 0, history: [] }
     this.usbTetherDevice = { found: false, name: null };
+    this.iosDevice = { found: false, detected: false, name: null, locked: false };
     this.isTetherDaemonRunning = false;
 
     // Start background scanner
     this.refreshHardwarePorts();
     this.checkUsbTether();
+    this.checkIosDevice();
     this.tickCount = 0;
     this.intervalId = setInterval(() => {
       this.tickCount++;
       if (this.tickCount % 5 === 0) {
         this.refreshHardwarePorts();
         this.checkUsbTether();
+        this.checkIosDevice();
       }
       if (this.tickCount % 3 === 0) {
         this.sendHeartbeat();
@@ -156,6 +159,121 @@ export class NetworkManager {
     }
   }
 
+  async checkIosDevice() {
+    if (process.platform !== 'darwin') {
+      this.iosDevice = { found: false, detected: false, name: null, locked: false };
+      return;
+    }
+
+    try {
+      const pyScript = `
+import socket, plistlib, struct, ssl, tempfile, json
+
+try:
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(1.0)
+    s.connect("/var/run/usbmuxd")
+    req = {"MessageType": "ListDevices", "ClientVersionString": "svorrent", "ProgName": "svorrent"}
+    p = plistlib.dumps(req)
+    s.sendall(struct.pack("<IIII", len(p) + 16, 1, 8, 1) + p)
+    l = struct.unpack("<IIII", s.recv(16))[0]
+    devs = plistlib.loads(s.recv(l - 16)).get("DeviceList", [])
+    usb_devs = [d for d in devs if d.get("Properties", {}).get("ConnectionType") == "USB"]
+    if not usb_devs:
+        print(json.dumps({"detected": False}))
+        exit(0)
+
+    dev = usb_devs[0]["Properties"]
+    dev_id = dev["DeviceID"]
+    serial = dev["SerialNumber"]
+
+    req2 = {"MessageType": "ReadPairRecord", "PairRecordID": serial, "ClientVersionString": "svorrent", "ProgName": "svorrent"}
+    p2 = plistlib.dumps(req2)
+    s.sendall(struct.pack("<IIII", len(p2) + 16, 1, 8, 1) + p2)
+    l2 = struct.unpack("<IIII", s.recv(16))[0]
+    rec_resp = plistlib.loads(s.recv(l2 - 16))
+    rec_data = rec_resp.get("PairRecordData")
+    if not rec_data:
+        print(json.dumps({"detected": True, "paired": False, "locked": True, "name": "iPhone"}))
+        exit(0)
+    record = plistlib.loads(rec_data)
+
+    s2 = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s2.settimeout(1.0)
+    s2.connect("/var/run/usbmuxd")
+    req_conn = {"MessageType": "Connect", "DeviceID": dev_id, "PortNumber": socket.htons(62078), "ClientVersionString": "svorrent", "ProgName": "svorrent"}
+    p_conn = plistlib.dumps(req_conn)
+    s2.sendall(struct.pack("<IIII", len(p_conn) + 16, 1, 8, 1) + p_conn)
+    l_conn = struct.unpack("<IIII", s2.recv(16))[0]
+    s2.recv(l_conn - 16)
+
+    def send_plist(sock, obj):
+        data = plistlib.dumps(obj)
+        sock.sendall(struct.pack(">I", len(data)) + data)
+
+    def recv_plist(sock):
+        hdr = sock.recv(4)
+        if not hdr: return None
+        length = struct.unpack(">I", hdr)[0]
+        data = b""
+        while len(data) < length:
+            data += sock.recv(length - len(data))
+        return plistlib.loads(data)
+
+    send_plist(s2, {"Request": "StartSession", "HostID": record["HostID"], "SystemBUID": record["SystemBUID"]})
+    recv_plist(s2)
+
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    with tempfile.NamedTemporaryFile("wb", delete=False) as f_cert, tempfile.NamedTemporaryFile("wb", delete=False) as f_key:
+        f_cert.write(record["HostCertificate"])
+        f_cert.flush()
+        f_key.write(record["HostPrivateKey"])
+        f_key.flush()
+        ctx.load_cert_chain(f_cert.name, f_key.name)
+
+    ssl_sock = ctx.wrap_socket(s2)
+    send_plist(ssl_sock, {"Request": "GetValue", "Key": "PasswordProtected"})
+    is_locked = recv_plist(ssl_sock).get("Value", False)
+
+    send_plist(ssl_sock, {"Request": "GetValue", "Key": "DeviceName"})
+    dev_name = recv_plist(ssl_sock).get("Value", "iPhone")
+
+    print(json.dumps({"detected": True, "paired": True, "locked": bool(is_locked), "name": dev_name}))
+except Exception as e:
+    print(json.dumps({"detected": False, "error": str(e)}))
+`;
+      const { stdout } = await execFileAsync('/usr/bin/python3', ['-c', pyScript], { timeout: 3000 });
+      const parsed = JSON.parse(stdout.trim());
+      if (parsed?.detected) {
+        this.iosDevice = {
+          found: true,
+          detected: true,
+          name: parsed.name || 'iPhone',
+          locked: !!parsed.locked,
+        };
+        return;
+      }
+    } catch {}
+
+    // Fallback: check ioreg for connected Apple USB mobile device
+    try {
+      const { stdout } = await execAsync('ioreg -p IOUSB -l -w0 -r -n iPhone');
+      if (stdout.includes('"idVendor" = 1452')) {
+        this.iosDevice = {
+          found: true,
+          detected: true,
+          name: 'iPhone',
+          locked: false,
+        };
+        return;
+      }
+    } catch {}
+
+    this.iosDevice = { found: false, detected: false, name: null, locked: false };
+  }
+
   // Keep active cellular tether links from becoming idle. Other interfaces do
   // not need this traffic, and a keepalive cannot guarantee carrier behavior.
   sendHeartbeat() {
@@ -191,6 +309,7 @@ export class NetworkManager {
     await Promise.allSettled([
       this.refreshHardwarePorts(),
       this.checkUsbTether(),
+      this.checkIosDevice(),
     ]);
     this.tick();
     return this.getSnapshot();
@@ -648,6 +767,12 @@ export class NetworkManager {
         helperInstalled: fs.existsSync('/Library/PrivilegedHelperTools/com.svorrent.tetherd/svorrent-tetherd'),
         daemonActive: this.isTetherDaemonRunning,
         interfaceActive: all.some((i) => i.device.startsWith('feth') && i.connected),
+      },
+      iosTether: {
+        detected: this.iosDevice?.found || false,
+        name: this.iosDevice?.name || 'iPhone',
+        locked: this.iosDevice?.locked ?? false,
+        interfaceActive: all.some((i) => i.type === 'cellular' && i.connected),
       },
     };
   }

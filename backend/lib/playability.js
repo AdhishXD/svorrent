@@ -78,6 +78,28 @@ export function estimateDuration(fileLength) {
 }
 
 /**
+ * Check if the MP4 moov atom is located near the start of the file (faststart).
+ */
+export function hasMoovAtBeginning(filePath, maxScanBytes = 8 * 1024 * 1024) {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) return false;
+    const fd = fs.openSync(filePath, 'r');
+    const stat = fs.fstatSync(fd);
+    const toRead = Math.min(stat.size, maxScanBytes);
+    if (toRead < 32) {
+      fs.closeSync(fd);
+      return false;
+    }
+    const buf = Buffer.alloc(toRead);
+    fs.readSync(fd, buf, 0, toRead, 0);
+    fs.closeSync(fd);
+    return buf.includes('moov');
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Trigger asynchronous ffprobe extraction to determine real container runtime.
  */
 export function probeMediaAsync(filePath) {
@@ -244,7 +266,7 @@ export function assessTorrentPlayability(torrent, downloadDir) {
   const progressRatio = downloaded / totalLength;
 
   // Requirement 1: Container header safety threshold.
-  // Matroska / MP4 container headers, audio tracks, and initial cluster must be present.
+  // Matroska container headers are at the beginning; MP4 container moov atoms are typically at the tail.
   const minHeaderBytes = Math.min(25 * 1024 * 1024, totalLength * 0.02);
   // Download totals include unverified/out-of-order blocks. Only consecutive
   // verified pieces at this file's offset can supply playable headers.
@@ -257,8 +279,29 @@ export function assessTorrentPlayability(torrent, downloadDir) {
     }
   }
 
+  // MP4 files require the 'moov' atom to demux video/audio streams.
+  // If not placed at the file head (faststart), the moov atom resides in the final pieces of the file.
+  const isMp4 = ['.mp4', '.m4v', '.mov'].includes(path.extname(primary.name || '').toLowerCase());
+  let tailReady = true;
+  if (isMp4 && torrent.bitfield && torrent.pieceLength > 0) {
+    if (!hasMoovAtBeginning(primary.fullPath)) {
+      const fileOffset = typeof primary.file?.offset === 'number' ? primary.file.offset : 0;
+      const lastPieceOfFile = typeof primary.file?._endPiece === 'number'
+        ? primary.file._endPiece
+        : Math.floor((fileOffset + totalLength - 1) / torrent.pieceLength);
+      const tailPiecesCount = Math.max(2, Math.min(6, Math.ceil((20 * 1024 * 1024) / torrent.pieceLength)));
+      const startTailPiece = Math.max(0, lastPieceOfFile - tailPiecesCount + 1);
+      for (let p = startTailPiece; p <= lastPieceOfFile; p++) {
+        if (!torrent.bitfield.get(p)) {
+          tailReady = false;
+          break;
+        }
+      }
+    }
+  }
+
   // Queue background ffprobe extraction if headers are present
-  if (bufferedBytes >= minHeaderBytes) {
+  if (bufferedBytes >= minHeaderBytes && tailReady) {
     probeMediaAsync(primary.fullPath);
   }
 
@@ -327,7 +370,7 @@ export function assessTorrentPlayability(torrent, downloadDir) {
 
   const remainingBytes = Math.max(0, totalLength - downloaded);
   const etaSeconds = remainingBytes / effectiveSpeed;
-  const headersReady = bufferedBytes >= minHeaderBytes;
+  const headersReady = (bufferedBytes >= minHeaderBytes) && tailReady;
 
   // Physical Condition: Download ETA with 20% margin <= Total Video Runtime
   if (headersReady && (etaSeconds * safetyMargin <= duration)) {
@@ -351,6 +394,24 @@ export function assessTorrentPlayability(torrent, downloadDir) {
   const bufferNeeded = Math.max(headerNeeded, streamingBufferNeeded);
   const secondsUntilSafe = Math.ceil(bufferNeeded / effectiveSpeed);
   const timeFormatted = formatEta(secondsUntilSafe);
+
+  // If MP4 container index at the tail is still missing
+  if (!tailReady) {
+    const tailBufferNeeded = Math.min(25 * 1024 * 1024, totalLength * 0.02);
+    const secSafe = Math.ceil(tailBufferNeeded / Math.max(1, effectiveSpeed));
+    return {
+      isMedia: true,
+      canPlay: false,
+      fileName: primary.name,
+      filePath: primary.fullPath,
+      duration,
+      progress: progressRatio,
+      bufferNeeded: tailBufferNeeded,
+      secondsUntilSafe: secSafe,
+      timeToPlay: formatEta(secSafe),
+      reason: 'Buffering MP4 index (downloading index at end of file…)',
+    };
+  }
 
   // If headers are still buffering
   if (!headersReady) {

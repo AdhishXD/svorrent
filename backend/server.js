@@ -470,7 +470,7 @@ function setupTorrentHooks(torrent) {
   if (torrent.discovery) recordDiscoveredPeers();
   else torrent.once('infoHash', recordDiscoveredPeers);
 
-  torrent.once('ready', () => {
+  const onReady = () => {
     // Sequential Strategy: commits pieces to disk and bitfield in order so restarts/failures resume seamlessly
     torrent.strategy = 'sequential';
     if (torrent.done) {
@@ -482,14 +482,32 @@ function setupTorrentHooks(torrent) {
       return;
     }
     if (torrent.pieces && torrent.pieces.length > 0) {
-      torrent.select(0, torrent.pieces.length - 1);
+      const lastPiece = torrent.pieces.length - 1;
+      const primary = findPrimaryVideoInTorrent(torrent, torrent.path || DOWNLOAD_DIR);
+
+      // 1. Full torrent sequential download baseline
+      torrent.select(0, lastPiece, 0);
+
+      let fileStart = 0;
+      let fileEnd = lastPiece;
+      if (primary?.file && typeof primary.file._startPiece === 'number') {
+        fileStart = primary.file._startPiece;
+        fileEnd = primary.file._endPiece;
+      }
+
+      const headCount = Math.min(20, fileEnd - fileStart);
+      const tailCount = Math.min(15, fileEnd - fileStart);
+      const tailStart = Math.max(fileStart, fileEnd - tailCount);
+
+      // 2. High-priority stream selections: bypass sequential order so MP4 moov atom downloads immediately
+      if (typeof torrent._select === 'function') {
+        torrent._select(tailStart, fileEnd, 5, null, true);
+        torrent._select(fileStart, fileStart + headCount, 4, null, true);
+      }
+
       if (typeof torrent.critical === 'function') {
-        const lastPiece = torrent.pieces.length - 1;
-        // Prioritize container headers (first 20 pieces) and container footers / moov atom / Cues (last 15-20 pieces)
-        torrent.critical(0, Math.min(20, lastPiece));
-        if (lastPiece > 40) {
-          torrent.critical(Math.max(0, lastPiece - 15), lastPiece);
-        }
+        torrent.critical(tailStart, fileEnd);
+        torrent.critical(fileStart, fileStart + headCount);
       }
     }
     if (torrent.wires) {
@@ -502,7 +520,13 @@ function setupTorrentHooks(torrent) {
     }
     archive.save(torrent);
     saveSession();
-  });
+  };
+
+  if (torrent.ready) {
+    onReady();
+  } else {
+    torrent.once('ready', onReady);
+  }
 
   torrent.on('verified', () => {
     scheduleSaveSession();
@@ -839,10 +863,19 @@ app.get('/api/torrent/:id/nerd-stats', async (req, res) => {
       grid.push(isDone ? 2 : isDownloading ? 1 : 0);
     }
 
+    const tailPiecesStatus = [];
+    if (torrent.bitfield && total > 0) {
+      for (let p = Math.max(0, total - 15); p < total; p++) {
+        tailPiecesStatus.push({ piece: p, verified: !!torrent.bitfield.get(p) });
+      }
+    }
+
     pieceStats = {
       total,
       pieceLength: torrent.pieceLength,
       verified: verifiedCount,
+      tailPieces: tailPiecesStatus,
+      selections: (torrent._selections?._items || []).map((s) => ({ from: s.from, to: s.to, priority: s.priority, isStream: !!s.isStreamSelection })),
       grid,
     };
   }

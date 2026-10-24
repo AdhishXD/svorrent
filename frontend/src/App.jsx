@@ -3,7 +3,7 @@ import { SearchPage } from './SearchPage';
 import { DownloadsManager } from './DownloadsManager';
 import { NetworksPage } from './NetworksPage';
 import { Icon } from './Icon';
-import { apiGet, apiPost, formatSpeed } from './lib';
+import { apiGet, formatSpeed } from './lib';
 
 const routeFromPath = () => {
   const p = window.location.pathname.replace(/\/+$/, '') || '/';
@@ -23,20 +23,6 @@ function App() {
   const polling = useRef(null);
   const mainRef = useRef(null);
   const previousRoute = useRef(route);
-  const [updateInfo, setUpdateInfo] = useState(null);
-  const [showUpdateModal, setShowUpdateModal] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-    const fetchUpdateStatus = () => {
-      apiGet('/updater/status').then((info) => {
-        if (active && info && typeof info === 'object') setUpdateInfo(info);
-      }).catch(() => {});
-    };
-    fetchUpdateStatus();
-    const timer = setInterval(fetchUpdateStatus, 30000);
-    return () => { active = false; clearInterval(timer); };
-  }, []);
 
   const refreshTorrents = useCallback(function refresh() {
     const session = polling.current;
@@ -187,17 +173,6 @@ function App() {
           </nav>
 
           <div className="topbar-status">
-            {updateInfo?.readyToInstall && (
-              <button
-                id="btn-update-available"
-                className="btn-update"
-                onClick={() => setShowUpdateModal(true)}
-                title={`Svorrent ${updateInfo.latestVersion} is downloaded and ready to apply`}
-              >
-                <Icon name="refresh" size={12} />
-                <span>Restart to update ({updateInfo.latestVersion})</span>
-              </button>
-            )}
             {!backendUp ? (
               <span className="status-offline" role="status" title={backendError}>
                 Backend unavailable{backendError ? `: ${backendError}` : ''}
@@ -243,42 +218,7 @@ function App() {
         </div>
       )}
 
-      {showUpdateModal && (
-        <div className="modal-backdrop" onClick={() => setShowUpdateModal(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-head">
-              <h3 className="modal-title">Update Ready ({updateInfo?.latestVersion})</h3>
-              <button className="icon-btn" onClick={() => setShowUpdateModal(false)}>✕</button>
-            </div>
-            <div className="modal-body">
-              <p className="modal-desc">
-                A new version of Svorrent has been silently downloaded in the background and is ready to apply.
-              </p>
-              <p className="modal-desc muted" style={{ marginTop: 8 }}>
-                Restarting will apply the update in-place. Your current downloads, torrents, and settings will remain completely intact.
-              </p>
-            </div>
-            <div className="modal-actions">
-              <button className="btn btn-outline" onClick={() => setShowUpdateModal(false)}>Later</button>
-              <button
-                id="btn-confirm-restart-update"
-                className="btn btn-primary"
-                onClick={async () => {
-                  setShowUpdateModal(false);
-                  notify('Restarting Svorrent to apply update...', 'info');
-                  try {
-                    await apiPost('/updater/restart');
-                  } catch (err) {
-                    notify(err.message || 'Failed to trigger restart', 'danger');
-                  }
-                }}
-              >
-                Restart & Update Now
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+
     </div>
   );
 }

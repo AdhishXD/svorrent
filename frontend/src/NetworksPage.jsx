@@ -110,6 +110,58 @@ export function NetworksPage({ notify, isActive = true }) {
   const requestRef = useRef(null);
   const notifyRef = useRef(notify);
 
+  // Software updates state
+  const [updater, setUpdater] = useState(null);
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+  const [isRestartingUpdate, setIsRestartingUpdate] = useState(false);
+
+  const fetchUpdater = () => {
+    apiGet('/updater/status')
+      .then((status) => {
+        if (status && typeof status === 'object') setUpdater(status);
+      })
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    if (!isActive) return;
+    fetchUpdater();
+    const interval = setInterval(fetchUpdater, 20000);
+    return () => clearInterval(interval);
+  }, [isActive]);
+
+  const handleCheckUpdate = async () => {
+    if (isCheckingUpdate) return;
+    setIsCheckingUpdate(true);
+    try {
+      const res = await apiPost('/updater/check');
+      if (res && typeof res === 'object') {
+        setUpdater(res);
+        if (res.updateAvailable) {
+          notifyRef.current?.(`New version available: ${res.latestVersion}`, 'info');
+        } else {
+          notifyRef.current?.(`Svorrent is up to date (v${res.currentVersion || '1.0.3'})`, 'ok');
+        }
+      }
+    } catch (err) {
+      notifyRef.current?.(err.message || 'Failed to check for updates', 'danger');
+    } finally {
+      setIsCheckingUpdate(false);
+    }
+  };
+
+  const handleRestartUpdate = async () => {
+    if (isRestartingUpdate) return;
+    setIsRestartingUpdate(true);
+    notifyRef.current?.('Restarting Svorrent to apply update...', 'info');
+    try {
+      await apiPost('/updater/restart');
+    } catch (err) {
+      notifyRef.current?.(err.message || 'Failed to trigger restart', 'danger');
+      setIsRestartingUpdate(false);
+    }
+  };
+
   useEffect(() => {
     notifyRef.current = notify;
   }, [notify]);
@@ -215,7 +267,23 @@ export function NetworksPage({ notify, isActive = true }) {
 
       {error && <p className="muted" role="alert">Network update failed: {error} Retrying automatically.</p>}
 
-      {selfAssignedInterfaces.length > 0 && (
+      {data?.iosTether?.detected && !data?.iosTether?.interfaceActive && (
+        <div className="usb-tether-banner" role="status">
+          <div className="usb-tether-dot" />
+          <div className="usb-tether-content">
+            <span className="usb-tether-title">
+              {data.iosTether.name || 'iPhone'} connected via USB
+            </span>
+            <span className="usb-tether-hint muted">
+              {data.iosTether.locked
+                ? 'Unlock your iPhone with Face ID or Passcode to enable USB Personal Hotspot.'
+                : 'Toggle "Allow Others to Join" OFF and back ON on your iPhone (or replug the USB cable) to activate USB Hotspot.'}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {selfAssignedInterfaces.length > 0 && !data?.iosTether?.detected && (
         <div className="usb-tether-banner" role="status">
           <div className="usb-tether-dot" />
           <div className="usb-tether-content">
@@ -392,7 +460,7 @@ export function NetworksPage({ notify, isActive = true }) {
                         <span
                           className={`status-dot ${isOnline ? 'is-online' : 'is-offline'}`}
                           style={{ backgroundColor: isOnline ? color : undefined }}
-                          title={iface.statusReason === 'link-local' ? 'Self-assigned address; no internet route' : !iface.connected ? 'Disconnected' : iface.enabled ? 'Routing enabled' : 'Routing disabled'}
+                          title={iface.statusReason === 'link-local' ? (data?.iosTether?.detected ? 'Hotspot inactive; waiting for iPhone Personal Hotspot' : 'Self-assigned address; no internet route') : !iface.connected ? 'Disconnected' : iface.enabled ? 'Routing enabled' : 'Routing disabled'}
                         />
                       </td>
                       <td className="col-iface">
@@ -400,7 +468,11 @@ export function NetworksPage({ notify, isActive = true }) {
                           <span className="iface-name">{iface.name}</span>
                         </div>
                         <span className="mono muted iface-device">{iface.device}</span>
-                        {iface.statusReason === 'link-local' && <span className="mono muted iface-device">Needs DHCP</span>}
+                        {iface.statusReason === 'link-local' && (
+                          <span className="mono muted iface-device">
+                            {data?.iosTether?.detected ? 'Hotspot Off' : 'Needs DHCP'}
+                          </span>
+                        )}
                       </td>
                       <td className="col-type">
                         <span className={`tag tag-iface tag-${iface.type}`}>
@@ -424,7 +496,7 @@ export function NetworksPage({ notify, isActive = true }) {
                           disabled={pendingAction !== null || !iface.connected}
                           aria-pressed={!!iface.enabled}
                           aria-label={`Toggle routing on ${iface.name}`}
-                          title={iface.statusReason === 'link-local' ? 'Configure this adapter in macOS Network settings first' : iface.enabled ? 'Disable adapter' : 'Enable adapter'}
+                          title={iface.statusReason === 'link-local' ? (data?.iosTether?.detected ? 'Enable Personal Hotspot on iPhone to route peer traffic' : 'Configure this adapter in macOS Network settings first') : iface.enabled ? 'Disable adapter' : 'Enable adapter'}
                         >
                           <span className="toggle-thumb" />
                         </button>
@@ -436,6 +508,75 @@ export function NetworksPage({ notify, isActive = true }) {
             </table>
           </div>
         )}
+      </div>
+
+      {/* Software Updates Section */}
+      <div className="updates-section">
+        <div className="section-head">
+          <h2 className="section-title">Software updates</h2>
+          <span className="section-sub muted">
+            Automatic background updates keep Svorrent fast, secure, and compatible.
+          </span>
+        </div>
+
+        <div className={`updates-card ${updater?.updateAvailable || updater?.readyToInstall ? 'has-update' : ''}`}>
+          <div className="updates-info">
+            <div className="updates-icon-wrap">
+              <Icon name={updater?.updateAvailable || updater?.readyToInstall ? 'download' : 'check'} size={18} />
+            </div>
+            <div className="updates-details">
+              <div className="updates-headline">
+                <span className="updates-version mono">Svorrent v{updater?.currentVersion || '1.0.3'}</span>
+                {updater?.readyToInstall ? (
+                  <span className="tag-update-available">READY TO INSTALL</span>
+                ) : updater?.updateAvailable ? (
+                  <span className="tag-update-available">UPDATE AVAILABLE</span>
+                ) : (
+                  <span className="tag-up-to-date">UP TO DATE</span>
+                )}
+              </div>
+              <p className="updates-desc">
+                {updater?.readyToInstall
+                  ? `Svorrent ${updater.latestVersion} has been downloaded and is ready to apply. Your downloads and settings will remain completely intact.`
+                  : updater?.status === 'downloading'
+                  ? `Downloading update ${updater.latestVersion} (${updater.downloadProgress || 0}%)…`
+                  : updater?.updateAvailable
+                  ? `Version ${updater.latestVersion} is available.`
+                  : 'You are running the latest version of Svorrent.'}
+              </p>
+              {updater?.lastChecked && (
+                <span className="updates-timestamp mono muted">
+                  Last checked: {new Date(updater.lastChecked).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="updates-actions">
+            {updater?.readyToInstall ? (
+              <button
+                id="btn-restart-update"
+                className="btn btn-primary"
+                onClick={handleRestartUpdate}
+                disabled={isRestartingUpdate}
+              >
+                <Icon name="refresh" size={14} className={isRestartingUpdate ? 'spin' : ''} />
+                <span>{isRestartingUpdate ? 'Restarting…' : `Restart to update (${updater.latestVersion})`}</span>
+              </button>
+            ) : (
+              <button
+                id="btn-check-update"
+                className="btn-check-update"
+                onClick={handleCheckUpdate}
+                disabled={isCheckingUpdate}
+                title="Check GitHub for the latest release"
+              >
+                <Icon name="refresh" size={14} className={isCheckingUpdate ? 'spin' : ''} />
+                <span>{isCheckingUpdate ? 'Checking…' : 'Check for update'}</span>
+              </button>
+            )}
+          </div>
+        </div>
       </div>
     </section>
   );

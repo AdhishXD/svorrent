@@ -84,15 +84,23 @@ export class AutoUpdater {
   }
 
   getStatus() {
+    const isNewer = this.state.latestVersion ? isNewerVersion(this.currentVersion, this.state.latestVersion) : false;
+    const ready = this.state.status === 'ready_to_install' && isNewer;
     return {
       currentVersion: this.currentVersion,
       ...this.state,
-      readyToInstall: this.state.status === 'ready_to_install',
+      updateAvailable: isNewer,
+      readyToInstall: ready,
     };
   }
 
   async checkForUpdates() {
-    if (this.state.status === 'downloading' || this.state.status === 'ready_to_install') {
+    const isNewer = this.state.latestVersion ? isNewerVersion(this.currentVersion, this.state.latestVersion) : false;
+    if (this.state.status === 'ready_to_install' && !isNewer) {
+      this.state.status = 'idle';
+      this.state.assetPath = null;
+    }
+    if (this.state.status === 'downloading' || (this.state.status === 'ready_to_install' && isNewer)) {
       return this.getStatus();
     }
 

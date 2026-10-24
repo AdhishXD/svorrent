@@ -1557,7 +1557,171 @@ a {
   background: #121314;
 }
 
+/* ---------- Software Updates Section (Networks Page Footer) ---------- */
 
+.updates-section {
+  margin-top: 36px;
+  margin-bottom: 32px;
+}
+
+.updates-section .section-head {
+  margin-bottom: 12px;
+  background: transparent;
+  padding: 0;
+  border: 0;
+}
+
+.updates-section .section-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 2px 0;
+  color: var(--text);
+}
+
+.updates-section .section-sub {
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+.updates-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  transition: all 0.2s ease;
+}
+
+.updates-card.has-update {
+  border-color: rgba(91, 141, 238, 0.45);
+  background: linear-gradient(180deg, rgba(91, 141, 238, 0.06) 0%, var(--surface) 100%);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+.updates-info {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+.updates-icon-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--ok);
+  flex-shrink: 0;
+}
+
+.updates-card.has-update .updates-icon-wrap {
+  color: var(--accent);
+  background: rgba(91, 141, 238, 0.12);
+  border-color: rgba(91, 141, 238, 0.35);
+}
+
+.updates-details {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.updates-headline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.updates-version {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.tag-up-to-date {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(87, 171, 114, 0.14);
+  color: var(--ok);
+  border: 1px solid rgba(87, 171, 114, 0.32);
+}
+
+.tag-update-available {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(91, 141, 238, 0.15);
+  color: var(--accent);
+  border: 1px solid rgba(91, 141, 238, 0.4);
+}
+
+.updates-desc {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-2);
+  line-height: 1.45;
+}
+
+.updates-timestamp {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-top: 1px;
+}
+
+.updates-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.btn-check-update {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 500;
+  padding: 6px 14px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  transition: all 0.15s ease;
+  cursor: pointer;
+}
+
+.btn-check-update:hover:not(:disabled) {
+  background: var(--hover);
+  border-color: var(--text-2);
+  color: #fff;
+}
+
+.btn-check-update:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
 
 /* ---------- Local Files & Halfway Recovery (Inline in Downloads Table) ---------- */
 
