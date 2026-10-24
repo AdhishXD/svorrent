@@ -107,11 +107,15 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      - name: 5. Install Playwright Chromium Browser
+      - name: 5. Build React Production Distribution
+        working-directory: frontend
+        run: npm run build
+
+      - name: 6. Install Playwright Chromium Browser
         working-directory: frontend
         run: npx playwright install --with-deps chromium
 
-      - name: 6. Run Browser End-to-End Navigation & Runtime Error Test
+      - name: 7. Run Browser End-to-End Navigation & Runtime Error Test
         working-directory: frontend
         run: npm run test:e2e
 
