@@ -65,21 +65,22 @@ static bool find_node(const wchar_t* appDir, wchar_t* outNode, size_t maxLen) {
     wchar_t candidate[MAX_PATH];
 
     // 1. Check in appDir\node.exe
-    swprintf(candidate, MAX_PATH, L"%s\\node.exe", appDir);
+    swprintf(candidate, MAX_PATH, L"%ls\\node.exe", appDir);
     if (file_exists(candidate)) {
         wcsncpy(outNode, candidate, maxLen);
         return true;
     }
 
     // 2. Check in appDir\node\node.exe
-    swprintf(candidate, MAX_PATH, L"%s\\node\\node.exe", appDir);
+    swprintf(candidate, MAX_PATH, L"%ls\\node\\node.exe", appDir);
     if (file_exists(candidate)) {
         wcsncpy(outNode, candidate, maxLen);
         return true;
     }
 
     // 3. Search PATH
-    if (SearchPathW(NULL, L"node.exe", NULL, MAX_PATH, candidate, NULL) > 0) {
+    DWORD found = SearchPathW(NULL, L"node.exe", NULL, MAX_PATH, candidate, NULL);
+    if (found > 0 && found < MAX_PATH && file_exists(candidate)) {
         wcsncpy(outNode, candidate, maxLen);
         return true;
     }
@@ -99,14 +100,14 @@ static bool find_node(const wchar_t* appDir, wchar_t* outNode, size_t maxLen) {
     // 5. LocalAppData / AppData
     wchar_t envBuf[MAX_PATH];
     if (GetEnvironmentVariableW(L"LOCALAPPDATA", envBuf, MAX_PATH) > 0) {
-        swprintf(candidate, MAX_PATH, L"%s\\Programs\\nodejs\\node.exe", envBuf);
+        swprintf(candidate, MAX_PATH, L"%ls\\Programs\\nodejs\\node.exe", envBuf);
         if (file_exists(candidate)) {
             wcsncpy(outNode, candidate, maxLen);
             return true;
         }
     }
     if (GetEnvironmentVariableW(L"APPDATA", envBuf, MAX_PATH) > 0) {
-        swprintf(candidate, MAX_PATH, L"%s\\nvm\\current\\node.exe", envBuf);
+        swprintf(candidate, MAX_PATH, L"%ls\\nvm\\current\\node.exe", envBuf);
         if (file_exists(candidate)) {
             wcsncpy(outNode, candidate, maxLen);
             return true;
@@ -146,16 +147,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     }
 
     wchar_t backendDir[MAX_PATH];
-    swprintf(backendDir, MAX_PATH, L"%s\\backend", exePath);
+    swprintf(backendDir, MAX_PATH, L"%ls\\backend", exePath);
 
     wchar_t serverJs[MAX_PATH];
-    swprintf(serverJs, MAX_PATH, L"%s\\server.js", backendDir);
+    swprintf(serverJs, MAX_PATH, L"%ls\\server.js", backendDir);
     if (!file_exists(serverJs)) {
-        swprintf(backendDir, MAX_PATH, L"%s", exePath);
+        MessageBoxW(NULL, L"Svorrent backend\\server.js is missing from the installation.", L"Svorrent Error", MB_ICONERROR | MB_OK);
+        return 1;
     }
 
     wchar_t cmdLine[1024];
-    swprintf(cmdLine, 1024, L"\"%s\" --openssl-legacy-provider server.js", nodePath);
+    swprintf(cmdLine, 1024, L"\"%ls\" --openssl-legacy-provider server.js", nodePath);
 
     STARTUPINFOW si;
     PROCESS_INFORMATION pi;
@@ -179,21 +181,25 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     );
 
     if (!success) {
-        MessageBoxW(NULL, L"Failed to launch Svorrent background server.", L"Svorrent Error", MB_ICONERROR | MB_OK);
+        DWORD error = GetLastError();
+        wchar_t message[256];
+        swprintf(message, 256, L"Failed to launch Svorrent background server (Windows error %lu).", error);
+        MessageBoxW(NULL, message, L"Svorrent Error", MB_ICONERROR | MB_OK);
         return 1;
     }
 
-    CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
 
     bool ready = false;
-    for (int i = 0; i < 20; i++) {
-        Sleep(300);
+    // First launch can take much longer than six seconds while Node loads dependencies.
+    for (int i = 0; i < 300; i++) {
+        if (WaitForSingleObject(pi.hProcess, 300) == WAIT_OBJECT_0) break;
         if (is_server_listening()) {
             ready = true;
             break;
         }
     }
+    CloseHandle(pi.hProcess);
 
     if (!ready) {
         MessageBoxW(NULL, L"Svorrent could not start its local server. Check that port 3001 is free and Node.js is installed, then try again.", L"Svorrent Startup Error", MB_ICONERROR | MB_OK);
