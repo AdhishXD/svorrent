@@ -473,6 +473,9 @@ function setupTorrentHooks(torrent) {
   torrent.once('ready', () => {
     // Sequential Strategy: commits pieces to disk and bitfield in order so restarts/failures resume seamlessly
     torrent.strategy = 'sequential';
+    if (torrent.done) {
+      torrent.maxConns = 15;
+    }
     if (torrent._pausedManually || torrent.paused) {
       setTorrentPaused(torrent, true);
       saveSession();
@@ -511,6 +514,8 @@ function setupTorrentHooks(torrent) {
     if (settingsManager.get().autoStopSeeding) {
       console.log(`[torrent done] autoStopSeeding enabled - stopping seeding for: ${torrent.name || torrent.infoHash}`);
       setTorrentPaused(torrent, true);
+    } else {
+      torrent.maxConns = 15;
     }
     saveSession();
   });

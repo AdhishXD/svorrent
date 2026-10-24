@@ -65,3 +65,45 @@ test('disabling an adapter via UI toggle immediately stops routing peer sockets 
     os.networkInterfaces = originalNetworkInterfaces;
   }
 });
+
+test('seeding peers on one adapter do not starve download peers on another adapter', () => {
+  const originalNetworkInterfaces = os.networkInterfaces;
+  os.networkInterfaces = () => ({
+    en0: [{ family: 'IPv4', internal: false, address: '192.168.1.100' }], // Wi-Fi
+    en12: [{ family: 'IPv4', internal: false, address: '172.20.10.4' }],   // Mobile Tether
+  });
+
+  try {
+    const manager = Object.create(NetworkManager.prototype);
+    manager.hardwarePorts = new Map([['en0', 'Wi-Fi'], ['en12', 'Samsung USB']]);
+    manager.disabledIds = new Set();
+    // Simulate en12 having 20 seeding peers in stats from a completed torrent
+    manager.stats = new Map([
+      ['en0', { peers: 2 }],
+      ['en12', { peers: 20 }],
+    ]);
+    manager.roundRobinIndex = 0;
+
+    // Mock client with 1 active downloading torrent that currently has 2 wires on en0, 0 on en12
+    const wireEn0_1 = {};
+    const wireEn0_2 = {};
+    manager.wireToInterface = new WeakMap([
+      [wireEn0_1, 'en0'],
+      [wireEn0_2, 'en0'],
+    ]);
+
+    manager.getClient = () => ({
+      torrents: [
+        { done: false, paused: false, destroyed: false, wires: [wireEn0_1, wireEn0_2] },
+        { done: true, paused: false, destroyed: false, wires: [] },
+      ],
+    });
+
+    // pickInterface should select en12 because en12 has 0 downloading peers (even though it has 20 seeding peers in stats)
+    const pick = manager.pickInterface();
+    assert.equal(pick.id, 'en12');
+  } finally {
+    os.networkInterfaces = originalNetworkInterfaces;
+  }
+});
+

@@ -302,14 +302,49 @@ export class NetworkManager {
     if (available.length === 0) return null;
     if (available.length === 1) return available[0];
 
+    const client = typeof this.getClient === 'function' ? this.getClient() : null;
+    const ifaceDownPeers = new Map();
+    const ifaceTotalPeers = new Map();
+    for (const iface of available) {
+      ifaceDownPeers.set(iface.id, 0);
+      ifaceTotalPeers.set(iface.id, this.stats?.get(iface.id)?.peers ?? 0);
+    }
+
+    let hasActiveDownloads = false;
+    if (client?.torrents) {
+      for (const t of client.torrents) {
+        if (t.destroyed || t.paused) continue;
+        if (!t.done) hasActiveDownloads = true;
+        if (!t.wires) continue;
+        const isDownloading = !t.done;
+        for (const wire of t.wires) {
+          if (wire.destroyed) continue;
+          const ifaceId = this.wireToInterface?.get(wire);
+          if (ifaceId && ifaceDownPeers.has(ifaceId)) {
+            if (isDownloading) {
+              ifaceDownPeers.set(ifaceId, ifaceDownPeers.get(ifaceId) + 1);
+            }
+          }
+        }
+      }
+    }
+
     let best = null;
-    let minPeers = Infinity;
+    let minScore = Infinity;
 
     for (let index = 0; index < available.length; index++) {
       const iface = available[(this.roundRobinIndex + index) % available.length];
-      const peerCount = this.stats.get(iface.id)?.peers ?? 0;
-      if (peerCount < minPeers) {
-        minPeers = peerCount;
+      const downPeers = ifaceDownPeers.get(iface.id) || 0;
+      const totalPeers = ifaceTotalPeers.get(iface.id) || 0;
+
+      // When downloading, prioritize distributing download connections equally across adapters.
+      // Seeding peers on finished torrents do not penalize a network adapter from receiving download peers.
+      const score = hasActiveDownloads
+        ? (downPeers * 100) + totalPeers
+        : totalPeers;
+
+      if (score < minScore) {
+        minScore = score;
         best = iface;
       }
     }
@@ -365,6 +400,45 @@ export class NetworkManager {
     }
 
     const availableActiveIds = ifaces.filter((i) => i.connected && !this.disabledIds.has(i.id)).map((i) => i.id);
+
+    // Detect newly attached/connected interfaces to dynamically rebalance active downloading swarms
+    if (!this.previousActiveIds) this.previousActiveIds = new Set(availableActiveIds);
+    const newlyConnectedIds = availableActiveIds.filter((id) => !this.previousActiveIds.has(id));
+    this.previousActiveIds = new Set(availableActiveIds);
+
+    if (newlyConnectedIds.length > 0 && client.torrents) {
+      for (const t of client.torrents) {
+        if (t.destroyed || t.paused) continue;
+        if (!t.done) {
+          try {
+            if (t.discovery?.tracker?._trackers) {
+              const opts = t.discovery.tracker._defaultAnnounceOpts({ event: 'started' });
+              for (const tr of t.discovery.tracker._trackers) {
+                try { tr.announce(opts); } catch {}
+              }
+            }
+            if (typeof t.discovery?._dhtAnnounce === 'function') {
+              try { t.discovery._dhtAnnounce(); } catch {}
+            }
+          } catch {}
+
+          if (t._knownPeers && t._knownPeers.size > 0) {
+            for (const addr of t._knownPeers) {
+              try { t.addPeer(addr); } catch {}
+            }
+          }
+
+          if (t.wires && t.wires.length >= 6) {
+            const wiresToRebalance = t.wires
+              .filter((w) => !w.destroyed && w.peerChoking && (typeof w.downloadSpeed !== 'function' || w.downloadSpeed() === 0))
+              .slice(0, Math.min(3, Math.floor(t.wires.length / 3)));
+            for (const wire of wiresToRebalance) {
+              try { wire.destroy(); } catch {}
+            }
+          }
+        }
+      }
+    }
 
     // Plexo reconcile: if an adapter was unplugged or disabled, tear down its remaining wires
     // so WebTorrent immediately redials on the remaining active interface(s).
