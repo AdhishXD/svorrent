@@ -139,6 +139,8 @@ export function NetworksPage({ notify, isActive = true }) {
         setUpdater(res);
         if (res.status === 'error') {
           notifyRef.current?.(res.error || 'Update check failed', 'danger');
+        } else if (res.status === 'unavailable') {
+          notifyRef.current?.('No signed main build has been published yet', 'info');
         } else if (res.status === 'building') {
           notifyRef.current?.(`Latest main commit ${res.latestCommit?.slice(0, 7)} is still being built`, 'info');
         } else if (res.updateAvailable) {
@@ -545,6 +547,8 @@ export function NetworksPage({ notify, isActive = true }) {
                   <span className="tag-update-available">UPDATE AVAILABLE</span>
                 ) : updater?.status === 'building' ? (
                   <span className="tag-up-to-date">BUILDING</span>
+                ) : updater?.status === 'unavailable' ? (
+                  <span className="tag-up-to-date">NOT PUBLISHED</span>
                 ) : updater?.status === 'error' ? (
                   <span className="tag-up-to-date">CHECK FAILED</span>
                 ) : (
@@ -560,6 +564,8 @@ export function NetworksPage({ notify, isActive = true }) {
                   ? `Downloading ${updater.channel === 'main' ? `main build ${updater.latestCommit?.slice(0, 7)}` : `update ${updater.latestVersion}`} (${updater.downloadProgress || 0}%)…`
                   : updater?.status === 'building'
                   ? `A signed app for main commit ${updater.latestCommit?.slice(0, 7)} is still being built. Check again shortly.`
+                  : updater?.status === 'unavailable'
+                  ? 'No signed main build has been published. The repository maintainer needs to configure signing and notarization.'
                   : updater?.status === 'error'
                   ? `Update check failed: ${updater.error || 'Unknown error'}`
                   : updater?.updateAvailable

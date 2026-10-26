@@ -66,6 +66,11 @@ test('macOS updater waits for a matching build and reports GitHub failures', asy
     const building = await updater.checkForUpdates();
     assert.equal(building.status, 'building');
     assert.equal(building.updateAvailable, false);
+    globalThis.fetch = async (url) => url.endsWith('/commits/main')
+      ? Response.json({ sha: latest }) : Response.json({}, { status: 404 });
+    const unavailable = await updater.checkForUpdates();
+    assert.equal(unavailable.status, 'unavailable');
+    assert.equal(unavailable.updateAvailable, false);
     globalThis.fetch = async () => Response.json({}, { status: 503 });
     const failed = await updater.checkForUpdates();
     assert.equal(failed.status, 'error');

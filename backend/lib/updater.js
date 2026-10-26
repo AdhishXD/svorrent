@@ -41,7 +41,7 @@ export class AutoUpdater {
     this.checkIntervalMs = options.checkIntervalMs || 6 * 60 * 60 * 1000; // 6 hours
     this.cacheDir = options.cacheDir || this.resolveCacheDir();
     this.state = {
-      status: 'idle', // 'idle' | 'checking' | 'building' | 'available' | 'downloading' | 'ready_to_install' | 'error'
+      status: 'idle', // 'idle' | 'checking' | 'building' | 'unavailable' | 'available' | 'downloading' | 'ready_to_install' | 'error'
       latestVersion: null,
       latestCommit: null,
       releaseNotes: '',
@@ -98,7 +98,7 @@ export class AutoUpdater {
       currentCommit: this.currentCommit,
       channel: this.platform === 'darwin' ? 'main' : 'release',
       ...this.state,
-      updateAvailable: isNewer && !['building', 'error'].includes(this.state.status),
+      updateAvailable: isNewer && !['building', 'unavailable', 'error'].includes(this.state.status),
       readyToInstall: ready,
     };
   }
@@ -198,7 +198,7 @@ export class AutoUpdater {
     });
     if (!releaseResponse.ok) {
       if (releaseResponse.status === 404) {
-        this.state.status = 'building';
+        this.state.status = 'unavailable';
         return this.getStatus();
       }
       throw new Error(`GitHub main build check failed (${releaseResponse.status})`);
