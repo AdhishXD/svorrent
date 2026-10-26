@@ -1,5 +1,4 @@
-// Svorrent updater: macOS follows signed builds of upstream main, while
-// Windows continues to use versioned releases.
+// Desktop installers follow signed builds of upstream main.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -89,14 +88,14 @@ export class AutoUpdater {
   }
 
   getStatus() {
-    const isNewer = this.platform === 'darwin'
+    const isNewer = ['darwin', 'win32'].includes(this.platform)
       ? !!this.state.latestCommit && this.state.latestCommit !== this.currentCommit
       : this.state.latestVersion ? isNewerVersion(this.currentVersion, this.state.latestVersion) : false;
     const ready = this.state.status === 'ready_to_install' && isNewer;
     return {
       currentVersion: this.currentVersion,
       currentCommit: this.currentCommit,
-      channel: this.platform === 'darwin' ? 'main' : 'release',
+      channel: ['darwin', 'win32'].includes(this.platform) ? 'main' : 'release',
       ...this.state,
       updateAvailable: isNewer && !['building', 'unavailable', 'error'].includes(this.state.status),
       readyToInstall: ready,
@@ -118,7 +117,7 @@ export class AutoUpdater {
     this.state.lastChecked = new Date().toISOString();
 
     try {
-      if (this.platform === 'darwin') return await this.checkMainBuild();
+      if (['darwin', 'win32'].includes(this.platform)) return await this.checkMainBuild();
 
       const res = await fetch(`https://api.github.com/repos/${this.repo}/releases/latest`, {
         headers: {
@@ -147,17 +146,9 @@ export class AutoUpdater {
       this.state.releaseNotes = release.body || '';
       this.state.releaseUrl = release.html_url || '';
 
-      // Find appropriate asset for current OS
+      // Legacy release channel for platforms without a main-commit installer.
       const assets = release.assets || [];
-      let targetAsset = null;
-
-      if (this.platform === 'darwin') {
-        targetAsset = assets.find((a) => a.name.endsWith('.dmg')) ||
-                      assets.find((a) => a.name.endsWith('.zip'));
-      } else if (this.platform === 'win32') {
-        targetAsset = assets.find((a) => a.name.endsWith('Setup.exe')) ||
-                      assets.find((a) => a.name.endsWith('.exe'));
-      }
+      const targetAsset = assets.find((a) => a.name.endsWith('.dmg'));
 
       if (targetAsset && targetAsset.browser_download_url) {
         // Silently start downloading in background
@@ -193,7 +184,8 @@ export class AutoUpdater {
       return this.getStatus();
     }
 
-    const releaseResponse = await fetch(`https://api.github.com/repos/${this.repo}/releases/tags/main-snapshot`, {
+    const releaseTag = this.platform === 'win32' ? 'main-windows-snapshot' : 'main-snapshot';
+    const releaseResponse = await fetch(`https://api.github.com/repos/${this.repo}/releases/tags/${releaseTag}`, {
       headers, signal: AbortSignal.timeout(10000),
     });
     if (!releaseResponse.ok) {
@@ -204,7 +196,8 @@ export class AutoUpdater {
       throw new Error(`GitHub main build check failed (${releaseResponse.status})`);
     }
     const release = await releaseResponse.json();
-    const asset = (release.assets || []).find((item) => item.name === `Svorrent-${main.sha}.dmg`);
+    const assetName = this.platform === 'win32' ? `Svorrent-${main.sha}-Setup.exe` : `Svorrent-${main.sha}.dmg`;
+    const asset = (release.assets || []).find((item) => item.name === assetName);
     if (!asset) {
       this.state.status = 'building';
       return this.getStatus();
@@ -317,18 +310,39 @@ export class AutoUpdater {
     console.log(`[Updater] Applying update from ${assetPath}...`);
 
     if (this.platform === 'win32') {
-      // Windows NSIS silent update execution
-      // Launches Svorrent-Setup.exe /S in background and exits current process
-      const child = spawn(assetPath, ['/S'], {
+      if (!/^sha256:[0-9a-f]{64}$/.test(this.state.assetDigest || '') ||
+          !/^[0-9a-f]{40}$/.test(this.state.latestCommit || '')) {
+        throw new Error('The main build is missing verification metadata');
+      }
+      const backendDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+      const installer = path.join(backendDir, 'scripts', 'apply-windows-update.ps1');
+      const buildInfo = JSON.parse(fs.readFileSync(path.join(backendDir, 'build-info.json'), 'utf8'));
+      if (!/^[0-9A-F]{40}$/.test(buildInfo.signerThumbprint || '')) {
+        throw new Error('This Windows build has no trusted signing certificate');
+      }
+      fs.accessSync(installer, fs.constants.R_OK);
+      const appDir = path.resolve(backendDir, '..');
+      const expectedDir = path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Svorrent');
+      if (path.normalize(appDir).toLowerCase() !== path.normalize(expectedDir).toLowerCase()) {
+        throw new Error('Automatic installation requires Svorrent in its standard Windows location');
+      }
+      const logDir = path.join(process.env.LOCALAPPDATA, 'Svorrent', 'logs');
+      fs.mkdirSync(logDir, { recursive: true });
+      const logFd = fs.openSync(path.join(logDir, 'update.log'), 'a');
+      const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+        '-File', installer, '-Installer', assetPath, '-Digest', this.state.assetDigest,
+        '-SignerThumbprint', buildInfo.signerThumbprint, '-ParentPid', String(process.pid), '-AppDir', appDir], {
         detached: true,
-        stdio: 'ignore',
+        stdio: ['ignore', logFd, logFd],
       });
+      fs.closeSync(logFd);
+      if (!child.pid) throw new Error('Could not start the Windows update installer');
       child.unref();
 
       setTimeout(() => {
         process.exit(0);
       }, 1000);
-      return { success: true, message: 'Restarting Windows installer...' };
+      return { success: true, message: 'Applying update and restarting Svorrent...' };
     }
 
     if (this.platform === 'darwin') {

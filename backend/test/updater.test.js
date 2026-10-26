@@ -56,6 +56,52 @@ test('macOS updater selects only the signed build matching upstream main', async
   }
 });
 
+test('Windows updater selects only the signed installer matching upstream main', async () => {
+  const installed = 'a'.repeat(40);
+  const latest = 'b'.repeat(40);
+  const asset = {
+    name: `Svorrent-${latest}-Setup.exe`,
+    digest: `sha256:${'c'.repeat(64)}`,
+    browser_download_url: 'https://github.com/sovopr/svorrent/releases/download/main-windows-snapshot/build.exe',
+  };
+  const updater = new AutoUpdater({ platform: 'win32', currentCommit: installed });
+  const originalFetch = globalThis.fetch;
+  let selected = null;
+  const requested = [];
+  updater.downloadUpdate = async (item) => { selected = item; };
+  globalThis.fetch = async (url) => {
+    requested.push(url);
+    return Response.json(url.endsWith('/commits/main')
+      ? { sha: latest }
+      : { assets: [{ ...asset, name: 'Svorrent-Setup.exe' }, asset] });
+  };
+  try {
+    const status = await updater.checkForUpdates();
+    assert.equal(status.channel, 'main');
+    assert.equal(status.latestCommit, latest);
+    assert.equal(status.updateAvailable, true);
+    assert.deepEqual(selected, asset);
+    assert.ok(requested.some((url) => url.endsWith('/releases/tags/main-windows-snapshot')));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Windows updater waits for a matching signed installer', async () => {
+  const latest = 'b'.repeat(40);
+  const updater = new AutoUpdater({ platform: 'win32', currentCommit: 'a'.repeat(40) });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => Response.json(url.endsWith('/commits/main')
+    ? { sha: latest } : { assets: [] });
+  try {
+    const status = await updater.checkForUpdates();
+    assert.equal(status.status, 'building');
+    assert.equal(status.updateAvailable, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('macOS updater waits for a matching build and reports GitHub failures', async () => {
   const latest = 'b'.repeat(40);
   const updater = new AutoUpdater({ platform: 'darwin', currentCommit: 'a'.repeat(40) });
