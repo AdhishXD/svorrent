@@ -237,6 +237,11 @@ export function NetworksPage({ notify, isActive = true }) {
   const connectedInterfaces = interfaces.filter((i) => i.connected);
   const selfAssignedInterfaces = interfaces.filter((i) => i.statusReason === 'link-local');
   const activeInterfaces = interfaces.filter((i) => i.connected && i.enabled);
+  const iphoneDhcpIface = interfaces.find(
+    (i) => (i.name?.toLowerCase().includes('iphone') || (data?.iosTether?.detected && i.type === 'cellular')) && i.statusReason === 'link-local'
+  );
+  const showIosBanner = (data?.iosTether?.detected && !data?.iosTether?.interfaceActive) || !!iphoneDhcpIface;
+  const nonIosSelfAssigned = selfAssignedInterfaces.filter((i) => i !== iphoneDhcpIface);
   const hasMultiple = bondedCount > 1;
   const downloadShare = (iface) => totalDownSpeed > 0 && iface.connected && iface.enabled
     ? Math.max(0, Math.min(100, Number(iface.sharePercent) || 0))
@@ -267,28 +272,25 @@ export function NetworksPage({ notify, isActive = true }) {
 
       {error && <p className="muted" role="alert">Network update failed: {error} Retrying automatically.</p>}
 
-      {data?.iosTether?.detected && !data?.iosTether?.interfaceActive && (
+      {showIosBanner && (
         <div className="usb-tether-banner" role="status">
           <div className="usb-tether-dot" />
           <div className="usb-tether-content">
             <span className="usb-tether-title">
-              {data.iosTether.name || 'iPhone'} connected via USB
-            </span>
-            <span className="usb-tether-hint muted">
-              {data.iosTether.locked
+              {data?.iosTether?.locked
                 ? 'Unlock your iPhone with Face ID or Passcode to enable USB Personal Hotspot.'
-                : 'Toggle "Allow Others to Join" OFF and back ON on your iPhone (or replug the USB cable) to activate USB Hotspot.'}
+                : 'Go to System Settings → Network → iPhone USB → Details… and turn off "Disable unless needed".'}
             </span>
           </div>
         </div>
       )}
 
-      {selfAssignedInterfaces.length > 0 && !data?.iosTether?.detected && (
+      {nonIosSelfAssigned.length > 0 && !showIosBanner && (
         <div className="usb-tether-banner" role="status">
           <div className="usb-tether-dot" />
           <div className="usb-tether-content">
             <span className="usb-tether-title">
-              {selfAssignedInterfaces.map((iface) => iface.device).join(', ')} has a self-assigned address
+              {nonIosSelfAssigned.map((iface) => iface.device).join(', ')} has a self-assigned address
             </span>
             <span className="usb-tether-hint muted">
               This adapter cannot carry internet traffic yet. Check its network service and DHCP settings in macOS, then refresh adapters.
@@ -460,7 +462,7 @@ export function NetworksPage({ notify, isActive = true }) {
                         <span
                           className={`status-dot ${isOnline ? 'is-online' : 'is-offline'}`}
                           style={{ backgroundColor: isOnline ? color : undefined }}
-                          title={iface.statusReason === 'link-local' ? (data?.iosTether?.detected ? 'Hotspot inactive; waiting for iPhone Personal Hotspot' : 'Self-assigned address; no internet route') : !iface.connected ? 'Disconnected' : iface.enabled ? 'Routing enabled' : 'Routing disabled'}
+                          title={iface.statusReason === 'link-local' ? 'Needs DHCP; turn off "Disable unless needed" in System Settings' : !iface.connected ? 'Disconnected' : iface.enabled ? 'Routing enabled' : 'Routing disabled'}
                         />
                       </td>
                       <td className="col-iface">
@@ -470,7 +472,7 @@ export function NetworksPage({ notify, isActive = true }) {
                         <span className="mono muted iface-device">{iface.device}</span>
                         {iface.statusReason === 'link-local' && (
                           <span className="mono muted iface-device">
-                            {data?.iosTether?.detected ? 'Hotspot Off' : 'Needs DHCP'}
+                            Needs DHCP
                           </span>
                         )}
                       </td>
@@ -496,7 +498,7 @@ export function NetworksPage({ notify, isActive = true }) {
                           disabled={pendingAction !== null || !iface.connected}
                           aria-pressed={!!iface.enabled}
                           aria-label={`Toggle routing on ${iface.name}`}
-                          title={iface.statusReason === 'link-local' ? (data?.iosTether?.detected ? 'Enable Personal Hotspot on iPhone to route peer traffic' : 'Configure this adapter in macOS Network settings first') : iface.enabled ? 'Disable adapter' : 'Enable adapter'}
+                          title={iface.statusReason === 'link-local' ? 'Turn off "Disable unless needed" in System Settings to route peer traffic' : iface.enabled ? 'Disable adapter' : 'Enable adapter'}
                         >
                           <span className="toggle-thumb" />
                         </button>
