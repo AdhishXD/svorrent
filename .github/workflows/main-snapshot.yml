@@ -35,7 +35,33 @@ jobs:
           npm ci
           npm test
 
+      - name: Check signing and notarization secrets
+        id: signing
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for required in MACOS_CERTIFICATE_P12_BASE64 MACOS_CERTIFICATE_PASSWORD MACOS_SIGNING_IDENTITY KEYCHAIN_PASSWORD APPLE_ID APPLE_TEAM_ID APPLE_APP_SPECIFIC_PASSWORD; do
+            if [ -z "${!required:-}" ]; then
+              echo "::warning::Missing $required; skipping signed main-snapshot publish"
+              missing=1
+            fi
+          done
+          if [ "$missing" -eq 1 ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Import Developer ID certificate
+        if: steps.signing.outputs.ready == 'true'
         env:
           MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
@@ -61,6 +87,7 @@ jobs:
           security find-identity -v -p codesigning "$keychain"
 
       - name: Build and notarize main commit
+        if: steps.signing.outputs.ready == 'true'
         env:
           SVORRENT_SOURCE_COMMIT: ${{ github.sha }}
           SVORRENT_CODESIGN_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
@@ -84,6 +111,7 @@ jobs:
           xcrun stapler validate dist-app/Svorrent.dmg
 
       - name: Publish installable build for this main commit
+        if: steps.signing.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -107,5 +135,5 @@ jobs:
           done
 
       - name: Remove temporary signing keychain
-        if: always()
+        if: always() && steps.signing.outputs.ready == 'true'
         run: security delete-keychain "$RUNNER_TEMP/svorrent-signing.keychain-db" 2>/dev/null || true
