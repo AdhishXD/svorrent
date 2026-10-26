@@ -137,6 +137,18 @@ jobs:
             if (-not $launcher.HasExited) { Stop-Process -Id $launcher.Id -Force }
           }
 
+      - name: 11. Build Windows installer package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install nsis --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'NSIS installation failed' }
+          & ./scripts/build-windows-snapshot.ps1
+          if (-not (Test-Path 'dist-win/Svorrent-Setup.exe')) { throw 'Installer output is missing' }
+          if (-not (Test-Path 'dist-win/staging/backend/scripts/apply-windows-update.ps1')) {
+            throw 'Update helper is missing from the installer staging directory'
+          }
+
   browser-ui-e2e:
     name: Browser E2E UI (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
