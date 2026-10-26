@@ -16,10 +16,11 @@ echo "==> Building Android USB tethering helper..."
 NATIVE_DIR="$BUILD_DIR/native"
 mkdir -p "$NATIVE_DIR"
 CXX="${SVORRENT_CXX:-/Library/Developer/CommandLineTools/usr/bin/clang++}"
+CC="${SVORRENT_CC:-/Library/Developer/CommandLineTools/usr/bin/clang}"
 SDK="${SVORRENT_SDK:-/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk}"
 OTOOL="${SVORRENT_OTOOL:-/Library/Developer/CommandLineTools/usr/bin/otool}"
 INSTALL_NAME_TOOL="${SVORRENT_INSTALL_NAME_TOOL:-/Library/Developer/CommandLineTools/usr/bin/install_name_tool}"
-if [ ! -x "$CXX" ] || [ ! -d "$SDK" ] || [ ! -x "$OTOOL" ] || [ ! -x "$INSTALL_NAME_TOOL" ]; then
+if [ ! -x "$CXX" ] || [ ! -x "$CC" ] || [ ! -d "$SDK" ] || [ ! -x "$OTOOL" ] || [ ! -x "$INSTALL_NAME_TOOL" ]; then
     echo "A macOS C++ toolchain and SDK are required to build Android USB support." >&2
     exit 1
 fi
@@ -105,12 +106,9 @@ cat << EOF > "$APP_BUNDLE/Contents/Info.plist"
 EOF
 
 echo "==> 5. Compiling Native macOS Cocoa Launcher..."
-clang -O2 -fobjc-arc -framework Cocoa "$ROOT_DIR/scripts/launcher_mac.m" -o "$APP_BUNDLE/Contents/MacOS/Svorrent"
+"$CC" -isysroot "$SDK" -O2 -fobjc-arc -framework Cocoa \
+    "$ROOT_DIR/scripts/launcher_mac.m" -o "$APP_BUNDLE/Contents/MacOS/Svorrent"
 chmod +x "$APP_BUNDLE/Contents/MacOS/Svorrent"
-
-
-echo "==> 5.5. Building native tether helper..."
-make -C "$ROOT_DIR/backend/tether"
 
 echo "==> 6. Copying application assets..."
 cp -R "$ROOT_DIR/frontend/dist"/* "$APP_BUNDLE/Contents/Resources/app/frontend/dist/"
@@ -128,11 +126,28 @@ cp -R "$ROOT_DIR/backend/node_modules" "$APP_BUNDLE/Contents/Resources/app/backe
 # Prune heavy unused databases (strip 104MB city-level GeoIP data; keep country data)
 echo "==> 7. Pruning heavy offline city databases..."
 rm -f "$APP_BUNDLE/Contents/Resources/app/backend/node_modules/geoip-lite/data/geoip-city"*
-find "$APP_BUNDLE" -type f \( -name '.DS_Store' -o -name '._*' \) -delete
 
 # Finder metadata copied from a developer checkout can make the app fail to
 # copy out of the mounted DMG (Finder error -36). It is not application data.
 find "$APP_BUNDLE" -type f \( -name '.DS_Store' -o -name '._*' \) -delete
+
+# The bare Mach-O signature produced by clang does not seal Info.plist or the
+# app's resources. Gatekeeper reports that downloaded bundle as "damaged".
+# Sign embedded Mach-O code first, then seal the complete app bundle.
+SIGN_IDENTITY="${SVORRENT_CODESIGN_IDENTITY:--}"
+SIGN_ARGS=(--force --sign "$SIGN_IDENTITY")
+if [ "$SIGN_IDENTITY" != '-' ]; then
+    SIGN_ARGS+=(--options runtime --timestamp)
+fi
+while IFS= read -r -d '' code_file; do
+    if file -b "$code_file" | grep -q 'Mach-O'; then
+        codesign "${SIGN_ARGS[@]}" "$code_file"
+    fi
+done < <(find "$APP_BUNDLE/Contents/Resources/app/backend" -type f \
+    \( -name '*.dylib' -o -name '*.node' -o -name '*.so' \) -print0)
+codesign "${SIGN_ARGS[@]}" "$APP_BUNDLE/Contents/Resources/app/backend/bin/svorrent-tetherd"
+codesign "${SIGN_ARGS[@]}" "$APP_BUNDLE"
+codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
 
 echo "==> 8. Creating DMG Staging with Applications shortcut..."
 cp -R "$APP_BUNDLE" "$DMG_STAGING/"
