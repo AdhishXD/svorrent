@@ -137,10 +137,20 @@ export function NetworksPage({ notify, isActive = true }) {
       const res = await apiPost('/updater/check');
       if (res && typeof res === 'object') {
         setUpdater(res);
-        if (res.updateAvailable) {
-          notifyRef.current?.(`New version available: ${res.latestVersion}`, 'info');
+        if (res.status === 'error') {
+          notifyRef.current?.(res.error || 'Update check failed', 'danger');
+        } else if (res.status === 'unavailable') {
+          notifyRef.current?.('No signed main build has been published yet', 'info');
+        } else if (res.status === 'building') {
+          notifyRef.current?.(`Latest main commit ${res.latestCommit?.slice(0, 7)} is still being built`, 'info');
+        } else if (res.updateAvailable) {
+          notifyRef.current?.(res.channel === 'main'
+            ? `New main build available: ${res.latestCommit?.slice(0, 7)}`
+            : `New version available: ${res.latestVersion}`, 'info');
         } else {
-          notifyRef.current?.(`Svorrent is up to date (v${res.currentVersion || '1.0.3'})`, 'ok');
+          notifyRef.current?.(res.channel === 'main'
+            ? `Svorrent matches upstream main (${res.currentCommit?.slice(0, 7) || 'unknown build'})`
+            : `Svorrent is up to date (v${res.currentVersion || '1.0.3'})`, 'ok');
         }
       }
     } catch (err) {
@@ -517,7 +527,9 @@ export function NetworksPage({ notify, isActive = true }) {
         <div className="section-head">
           <h2 className="section-title">Software updates</h2>
           <span className="section-sub muted">
-            Automatic background updates keep Svorrent fast, secure, and compatible.
+            {updater?.channel === 'main'
+              ? 'Checks upstream main and downloads signed builds of new commits.'
+              : 'Automatic background updates keep Svorrent fast, secure, and compatible.'}
           </span>
         </div>
 
@@ -528,23 +540,37 @@ export function NetworksPage({ notify, isActive = true }) {
             </div>
             <div className="updates-details">
               <div className="updates-headline">
-                <span className="updates-version mono">Svorrent v{updater?.currentVersion || '1.0.3'}</span>
+                <span className="updates-version mono">Svorrent v{updater?.currentVersion || '1.0.3'}{updater?.channel === 'main' && updater.currentCommit ? ` (${updater.currentCommit.slice(0, 7)})` : ''}</span>
                 {updater?.readyToInstall ? (
                   <span className="tag-update-available">READY TO INSTALL</span>
                 ) : updater?.updateAvailable ? (
                   <span className="tag-update-available">UPDATE AVAILABLE</span>
+                ) : updater?.status === 'building' ? (
+                  <span className="tag-up-to-date">BUILDING</span>
+                ) : updater?.status === 'unavailable' ? (
+                  <span className="tag-up-to-date">NOT PUBLISHED</span>
+                ) : updater?.status === 'error' ? (
+                  <span className="tag-up-to-date">CHECK FAILED</span>
                 ) : (
                   <span className="tag-up-to-date">UP TO DATE</span>
                 )}
               </div>
               <p className="updates-desc">
                 {updater?.readyToInstall
-                  ? `Svorrent ${updater.latestVersion} has been downloaded and is ready to apply. Your downloads and settings will remain completely intact.`
+                  ? updater.channel === 'main'
+                    ? `Main build ${updater.latestCommit?.slice(0, 7)} is downloaded and ready to install. Downloads and settings are stored outside the app.`
+                    : `Svorrent ${updater.latestVersion} has been downloaded and is ready to apply.`
                   : updater?.status === 'downloading'
-                  ? `Downloading update ${updater.latestVersion} (${updater.downloadProgress || 0}%)…`
+                  ? `Downloading ${updater.channel === 'main' ? `main build ${updater.latestCommit?.slice(0, 7)}` : `update ${updater.latestVersion}`} (${updater.downloadProgress || 0}%)…`
+                  : updater?.status === 'building'
+                  ? `A signed app for main commit ${updater.latestCommit?.slice(0, 7)} is still being built. Check again shortly.`
+                  : updater?.status === 'unavailable'
+                  ? 'No signed main build has been published. The repository maintainer needs to configure signing and notarization.'
+                  : updater?.status === 'error'
+                  ? `Update check failed: ${updater.error || 'Unknown error'}`
                   : updater?.updateAvailable
-                  ? `Version ${updater.latestVersion} is available.`
-                  : 'You are running the latest version of Svorrent.'}
+                  ? updater.channel === 'main' ? `Main build ${updater.latestCommit?.slice(0, 7)} is available.` : `Version ${updater.latestVersion} is available.`
+                  : updater?.channel === 'main' ? 'You are running the latest main build.' : 'You are running the latest version of Svorrent.'}
               </p>
               {updater?.lastChecked && (
                 <span className="updates-timestamp mono muted">
@@ -563,7 +589,7 @@ export function NetworksPage({ notify, isActive = true }) {
                 disabled={isRestartingUpdate}
               >
                 <Icon name="refresh" size={14} className={isRestartingUpdate ? 'spin' : ''} />
-                <span>{isRestartingUpdate ? 'Restarting…' : `Restart to update (${updater.latestVersion})`}</span>
+                <span>{isRestartingUpdate ? 'Restarting…' : `Restart to update (${updater.channel === 'main' ? updater.latestCommit?.slice(0, 7) : updater.latestVersion})`}</span>
               </button>
             ) : (
               <button
@@ -571,7 +597,7 @@ export function NetworksPage({ notify, isActive = true }) {
                 className="btn-check-update"
                 onClick={handleCheckUpdate}
                 disabled={isCheckingUpdate}
-                title="Check GitHub for the latest release"
+                title={updater?.channel === 'main' ? 'Check upstream main for a signed app build' : 'Check GitHub for the latest release'}
               >
                 <Icon name="refresh" size={14} className={isCheckingUpdate ? 'spin' : ''} />
                 <span>{isCheckingUpdate ? 'Checking…' : 'Check for update'}</span>

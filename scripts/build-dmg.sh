@@ -78,6 +78,11 @@ rm -rf "$ICON_TMP"
 
 echo "==> 4. Writing Info.plist..."
 APP_VERSION="$(node -p "require('$ROOT_DIR/backend/package.json').version" 2>/dev/null || echo "1.0.3")"
+SOURCE_COMMIT="${SVORRENT_SOURCE_COMMIT:-$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || true)}"
+if [[ ! "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "A full source commit SHA is required for update checks." >&2
+    exit 1
+fi
 cat << EOF > "$APP_BUNDLE/Contents/Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -114,6 +119,7 @@ echo "==> 6. Copying application assets..."
 cp -R "$ROOT_DIR/frontend/dist"/* "$APP_BUNDLE/Contents/Resources/app/frontend/dist/"
 cp -R "$ROOT_DIR/backend/server.js" "$APP_BUNDLE/Contents/Resources/app/backend/"
 cp -R "$ROOT_DIR/backend/package.json" "$APP_BUNDLE/Contents/Resources/app/backend/"
+printf '{"commit":"%s"}\n' "$SOURCE_COMMIT" > "$APP_BUNDLE/Contents/Resources/app/backend/build-info.json"
 cp -R "$ROOT_DIR/backend/lib" "$APP_BUNDLE/Contents/Resources/app/backend/"
 cp -R "$ROOT_DIR/backend/bin" "$APP_BUNDLE/Contents/Resources/app/backend/"
 cp -f "$NATIVE_DIR/svorrent-tetherd" "$APP_BUNDLE/Contents/Resources/app/backend/bin/"
