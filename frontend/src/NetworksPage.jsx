@@ -140,7 +140,7 @@ export function NetworksPage({ notify, isActive = true }) {
         if (res.status === 'error') {
           notifyRef.current?.(res.error || 'Update check failed', 'danger');
         } else if (res.status === 'unavailable') {
-          notifyRef.current?.('No signed main build has been published yet', 'info');
+          notifyRef.current?.('No signed main build for this platform has been published yet', 'info');
         } else if (res.status === 'building') {
           notifyRef.current?.(`Latest main commit ${res.latestCommit?.slice(0, 7)} is still being built`, 'info');
         } else if (res.updateAvailable) {
@@ -528,7 +528,7 @@ export function NetworksPage({ notify, isActive = true }) {
           <h2 className="section-title">Software updates</h2>
           <span className="section-sub muted">
             {updater?.channel === 'main'
-              ? 'Checks upstream main and downloads signed builds of new commits.'
+              ? 'Checks upstream main for signed builds of new commits.'
               : 'Automatic background updates keep Svorrent fast, secure, and compatible.'}
           </span>
         </div>
@@ -565,7 +565,7 @@ export function NetworksPage({ notify, isActive = true }) {
                   : updater?.status === 'building'
                   ? `A signed app for main commit ${updater.latestCommit?.slice(0, 7)} is still being built. Check again shortly.`
                   : updater?.status === 'unavailable'
-                  ? 'No signed main build has been published. The repository maintainer needs to configure signing and notarization.'
+                  ? 'No signed main build is available for this platform. The repository maintainer needs to configure signing.'
                   : updater?.status === 'error'
                   ? `Update check failed: ${updater.error || 'Unknown error'}`
                   : updater?.updateAvailable
