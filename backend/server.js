@@ -378,9 +378,15 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const pkg = require('./package.json');
 const currentVersion = pkg.version || '1.0.3';
+let currentCommit = null;
+try {
+  currentCommit = JSON.parse(fs.readFileSync(path.join(__dirname, 'build-info.json'), 'utf8')).commit;
+  if (!/^[0-9a-f]{40}$/.test(currentCommit)) currentCommit = null;
+} catch {}
 
 const autoUpdater = new AutoUpdater({
   currentVersion,
+  currentCommit,
   repo: 'sovopr/svorrent',
 });
 autoUpdater.start();

@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parseSemver, isNewerVersion, AutoUpdater } from '../lib/updater.js';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 test('parseSemver parses clean and prefixed versions correctly', () => {
   assert.deepEqual(parseSemver('1.0.1'), [1, 0, 1]);
@@ -25,4 +28,68 @@ test('AutoUpdater initializes in idle state with correct version metadata', () =
   assert.equal(status.currentVersion, '1.0.1');
   assert.equal(status.status, 'idle');
   assert.equal(status.readyToInstall, false);
+});
+
+test('macOS updater selects only the signed build matching upstream main', async () => {
+  const installed = 'a'.repeat(40);
+  const latest = 'b'.repeat(40);
+  const asset = {
+    name: `Svorrent-${latest}.dmg`,
+    digest: `sha256:${'c'.repeat(64)}`,
+    browser_download_url: 'https://github.com/sovopr/svorrent/releases/download/main-snapshot/build.dmg',
+  };
+  const updater = new AutoUpdater({ platform: 'darwin', currentCommit: installed });
+  const originalFetch = globalThis.fetch;
+  let selected = null;
+  updater.downloadUpdate = async (item) => { selected = item; };
+  globalThis.fetch = async (url) => Response.json(url.endsWith('/commits/main')
+    ? { sha: latest }
+    : { assets: [{ ...asset, name: `Svorrent-${installed}.dmg` }, asset] });
+  try {
+    const status = await updater.checkForUpdates();
+    assert.equal(status.channel, 'main');
+    assert.equal(status.latestCommit, latest);
+    assert.equal(status.updateAvailable, true);
+    assert.deepEqual(selected, asset);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('macOS updater waits for a matching build and reports GitHub failures', async () => {
+  const latest = 'b'.repeat(40);
+  const updater = new AutoUpdater({ platform: 'darwin', currentCommit: 'a'.repeat(40) });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => Response.json(url.endsWith('/commits/main')
+    ? { sha: latest } : { assets: [] });
+  try {
+    const building = await updater.checkForUpdates();
+    assert.equal(building.status, 'building');
+    assert.equal(building.updateAvailable, false);
+    globalThis.fetch = async () => Response.json({}, { status: 503 });
+    const failed = await updater.checkForUpdates();
+    assert.equal(failed.status, 'error');
+    assert.equal(failed.updateAvailable, false);
+    assert.match(failed.error, /503/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('macOS updater rejects a downloaded build with the wrong digest', async () => {
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'svorrent-updater-test-'));
+  const updater = new AutoUpdater({ platform: 'darwin', cacheDir });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response('not a valid DMG');
+  try {
+    await assert.rejects(updater.downloadUpdate({
+      name: 'Svorrent-test.dmg',
+      digest: `sha256:${'0'.repeat(64)}`,
+      browser_download_url: 'https://example.invalid/build.dmg',
+    }), /SHA-256 verification/);
+    assert.equal(fs.existsSync(path.join(cacheDir, 'Svorrent-test.dmg')), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    fs.rmSync(cacheDir, { recursive: true, force: true });
+  }
 });

@@ -24,3 +24,12 @@ the app and embedded native code with hardened runtime, submits the DMG with
 `notarytool`, staples the accepted ticket, and only then publishes the DMG and
 its checksum. Missing credentials or a rejected notarization fails the workflow
 before a release asset is uploaded.
+
+The `main-snapshot.yml` workflow uses the same secrets to publish a signed,
+notarized DMG for each commit pushed to `main`. The DMG is named
+`Svorrent-<40-character commit SHA>.dmg` in the `main-snapshot` prerelease.
+Installed macOS apps built with commit metadata compare the latest upstream
+`main` SHA with their own, wait for the matching build when CI is still running,
+and verify the GitHub asset digest and app signature before replacing the app.
+The first app with this updater must be installed manually; earlier releases
+only know how to check versioned GitHub releases.
