@@ -44,11 +44,27 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Backend tests failed' }
           Pop-Location
 
+      - name: Check Windows signing secrets
+        id: signing
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
+          SVORRENT_WINDOWS_PFX_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if (-not $env:WINDOWS_CERTIFICATE_PFX_BASE64 -or -not $env:SVORRENT_WINDOWS_PFX_PASSWORD) {
+            Write-Host '::warning::Missing Windows signing secrets; skipping signed Windows main publish'
+            "ready=false" >> $env:GITHUB_OUTPUT
+          } else {
+            "ready=true" >> $env:GITHUB_OUTPUT
+          }
+
       - name: Install NSIS
+        if: steps.signing.outputs.ready == 'true'
         shell: pwsh
         run: choco install nsis --yes --no-progress
 
       - name: Build and sign installer
+        if: steps.signing.outputs.ready == 'true'
         shell: pwsh
         env:
           WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
@@ -72,6 +88,7 @@ jobs:
           Remove-Item -LiteralPath $env:SVORRENT_WINDOWS_PFX -Force
 
       - name: Publish installable build for this main commit
+        if: steps.signing.outputs.ready == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
