@@ -40,7 +40,33 @@ jobs:
           cd backend
           npm ci
 
-      - name: 5. Import Developer ID certificate
+      - name: 5. Check signing and notarization secrets
+        id: signing
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for required in MACOS_CERTIFICATE_P12_BASE64 MACOS_CERTIFICATE_PASSWORD MACOS_SIGNING_IDENTITY KEYCHAIN_PASSWORD APPLE_ID APPLE_TEAM_ID APPLE_APP_SPECIFIC_PASSWORD; do
+            if [ -z "${!required:-}" ]; then
+              echo "::warning::Missing $required; building with ad-hoc sealed bundle signature without notarization"
+              missing=1
+            fi
+          done
+          if [ "$missing" -eq 1 ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 6. Import Developer ID certificate
+        if: steps.signing.outputs.ready == 'true'
         env:
           MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
@@ -48,12 +74,6 @@ jobs:
           KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
         run: |
           set -euo pipefail
-          for required in MACOS_CERTIFICATE_P12_BASE64 MACOS_CERTIFICATE_PASSWORD MACOS_SIGNING_IDENTITY KEYCHAIN_PASSWORD; do
-            if [ -z "${!required:-}" ]; then
-              echo "Missing $required; refusing to publish an unsigned macOS app" >&2
-              exit 1
-            fi
-          done
           keychain="$RUNNER_TEMP/svorrent-signing.keychain-db"
           certificate="$RUNNER_TEMP/svorrent-developer-id.p12"
           printf '%s' "$MACOS_CERTIFICATE_P12_BASE64" | base64 -D > "$certificate"
@@ -65,40 +85,35 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$keychain"
           security find-identity -v -p codesigning "$keychain"
 
-      - name: 6. Build and sign macOS DMG Package
+      - name: 7. Build and sign macOS DMG Package
         env:
-          SVORRENT_CODESIGN_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          SVORRENT_CODESIGN_IDENTITY: ${{ steps.signing.outputs.ready == 'true' && secrets.MACOS_SIGNING_IDENTITY || '-' }}
         run: |
           ./scripts/build-dmg.sh
           ls -lh dist-app/Svorrent.dmg
           codesign --verify --deep --strict --verbose=2 dist-app/Svorrent.app
 
-      - name: 7. Notarize and staple macOS DMG
+      - name: 8. Notarize and staple macOS DMG
+        if: steps.signing.outputs.ready == 'true'
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
         run: |
           set -euo pipefail
-          for required in APPLE_ID APPLE_TEAM_ID APPLE_APP_SPECIFIC_PASSWORD; do
-            if [ -z "${!required:-}" ]; then
-              echo "Missing $required; refusing to publish an unnotarized macOS app" >&2
-              exit 1
-            fi
-          done
           xcrun notarytool submit dist-app/Svorrent.dmg \
             --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
             --password "$APPLE_APP_SPECIFIC_PASSWORD" --wait
           xcrun stapler staple dist-app/Svorrent.dmg
           xcrun stapler validate dist-app/Svorrent.dmg
 
-      - name: 8. Generate Cryptographic SHA-256 Checksums
+      - name: 9. Generate Cryptographic SHA-256 Checksums
         run: |
           cd dist-app
           shasum -a 256 Svorrent.dmg > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
-      - name: 9. Publish GitHub Release
+      - name: 10. Publish GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -118,5 +133,5 @@ jobs:
           fi
 
       - name: Remove temporary signing keychain
-        if: always()
+        if: always() && steps.signing.outputs.ready == 'true'
         run: security delete-keychain "$RUNNER_TEMP/svorrent-signing.keychain-db" 2>/dev/null || true
