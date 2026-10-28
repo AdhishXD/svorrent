@@ -68,6 +68,15 @@ a {
   outline-offset: 1px;
 }
 
+[tabindex="-1"]:focus,
+[tabindex="-1"]:focus-visible,
+main:focus,
+main:focus-visible,
+.page:focus,
+.page:focus-visible {
+  outline: none;
+}
+
 .icon {
   flex: none;
   display: block;
@@ -207,6 +216,7 @@ a {
 .page {
   padding-top: 28px;
   padding-bottom: 64px;
+  outline: none;
 }
 
 /* ---------- Controls ---------- */

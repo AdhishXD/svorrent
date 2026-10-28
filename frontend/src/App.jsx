@@ -194,7 +194,13 @@ function App() {
         </div>
       </header>
 
-      <main className="page" ref={mainRef} tabIndex={-1} aria-label={route === 'search' ? 'Search' : route === 'downloads' ? 'Downloads' : 'Networks'}>
+      <main
+        className="page"
+        ref={mainRef}
+        tabIndex={-1}
+        style={{ outline: 'none' }}
+        aria-label={route === 'search' ? 'Search' : route === 'downloads' ? 'Downloads' : 'Networks'}
+      >
         <div style={{ display: route === 'search' ? 'block' : 'none' }}>
           <SearchPage initialQuery={searchTerm} isActive={route === 'search'} notify={notify} onDownloadAdded={refreshTorrents} />
         </div>
