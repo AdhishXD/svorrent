@@ -124,7 +124,7 @@ export function setTorrentPaused(torrent, paused) {
     }
 
     // 3. Instant DHT Lookup: query DHT immediately
-    if (torrent.discovery) {
+    if (torrent.client?.dht && torrent.discovery) {
       try {
         if (typeof torrent.discovery._dhtAnnounce === 'function') {
           torrent.discovery._dhtAnnounce();

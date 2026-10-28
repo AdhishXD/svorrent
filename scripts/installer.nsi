@@ -1,5 +1,8 @@
 Target x86-ansi
 !include "MUI2.nsh"
+!ifndef SVORRENT_VERSION
+    !error "SVORRENT_VERSION must be supplied by the package builder"
+!endif
 
 Name "Svorrent"
 Caption "Svorrent Setup"
@@ -39,7 +42,7 @@ Section "Svorrent Core" SecCore
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Svorrent" "DisplayName" "Svorrent"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Svorrent" "DisplayIcon" "$INSTDIR\Svorrent.exe"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Svorrent" "UninstallString" "$INSTDIR\Uninstall.exe"
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Svorrent" "DisplayVersion" "1.0.3"
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Svorrent" "DisplayVersion" "${SVORRENT_VERSION}"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Svorrent" "Publisher" "Svorrent Team"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Svorrent" "HelpLink" "https://github.com/sovopr/svorrent"
 

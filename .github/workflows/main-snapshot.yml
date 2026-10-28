@@ -50,15 +50,12 @@ jobs:
           missing=0
           for required in MACOS_CERTIFICATE_P12_BASE64 MACOS_CERTIFICATE_PASSWORD MACOS_SIGNING_IDENTITY KEYCHAIN_PASSWORD APPLE_ID APPLE_TEAM_ID APPLE_APP_SPECIFIC_PASSWORD; do
             if [ -z "${!required:-}" ]; then
-              echo "::warning::Missing $required; skipping signed main-snapshot publish"
+              echo "::error::Missing $required; cannot publish a signed main-snapshot build"
               missing=1
             fi
           done
-          if [ "$missing" -eq 1 ]; then
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          fi
+          if [ "$missing" -eq 1 ]; then exit 1; fi
+          echo "ready=true" >> "$GITHUB_OUTPUT"
 
       - name: Import Developer ID certificate
         if: steps.signing.outputs.ready == 'true'

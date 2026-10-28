@@ -40,6 +40,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  dependency-audit:
+    name: Dependency vulnerability inventory (non-gating)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+      - name: Audit backend production dependencies
+        working-directory: backend
+        shell: bash
+        run: |
+          npm audit --omit=dev --json > audit.json || true
+          node -e "const fs=require('node:fs');const a=JSON.parse(fs.readFileSync('audit.json'));if(!a.metadata?.vulnerabilities)throw Error('npm audit did not return vulnerability metadata');const v=a.metadata.vulnerabilities;fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,'Backend production dependencies: '+JSON.stringify(v)+'\n');if(v.high||v.critical)console.log('::warning::Backend has '+v.high+' high and '+v.critical+' critical inherited advisories; see audit artifact')"
+      - name: Audit frontend production dependencies
+        working-directory: frontend
+        shell: bash
+        run: |
+          npm audit --omit=dev --json > audit.json || true
+          node -e "const fs=require('node:fs');const a=JSON.parse(fs.readFileSync('audit.json'));if(!a.metadata?.vulnerabilities)throw Error('npm audit did not return vulnerability metadata');const v=a.metadata.vulnerabilities;fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,'Frontend production dependencies: '+JSON.stringify(v)+'\n');if(v.high||v.critical)console.log('::warning::Frontend has '+v.high+' high and '+v.critical+' critical inherited advisories; see audit artifact')"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dependency-audit
+          path: |
+            backend/audit.json
+            frontend/audit.json
+          if-no-files-found: error
+
   core-suite:
     name: Core Suite (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -84,6 +112,16 @@ jobs:
       - name: 8. Run Backend Security & Logic Unit Tests
         working-directory: backend
         run: npm test
+
+      - name: Install FFmpeg for real-media integration test
+        shell: bash
+        run: |
+          if command -v ffmpeg >/dev/null 2>&1; then exit 0; fi
+          case "$RUNNER_OS" in
+            Linux) sudo apt-get update && sudo apt-get install -y ffmpeg ;;
+            macOS) brew install ffmpeg ;;
+            Windows) choco install ffmpeg --yes --no-progress ;;
+          esac
 
       - name: 9. Run Local Hermetic BitTorrent Transfer Test
         working-directory: backend
@@ -150,13 +188,19 @@ jobs:
           }
 
   browser-ui-e2e:
-    name: Browser E2E UI (${{ matrix.os }})
+    name: Browser E2E UI (${{ matrix.os }}, ${{ matrix.browser }})
     runs-on: ${{ matrix.os }}
     needs: core-suite
     strategy:
       fail-fast: false
       matrix:
-        os: [ ubuntu-latest, windows-latest ]
+        include:
+          - os: ubuntu-latest
+            browser: chromium
+          - os: windows-latest
+            browser: chromium
+          - os: macos-latest
+            browser: webkit
 
     steps:
       - name: 1. Checkout repository
@@ -185,11 +229,17 @@ jobs:
 
       - name: 6. Install Playwright Chromium Browser
         working-directory: frontend
-        run: npx playwright install --with-deps chromium
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = Linux ]; then
+            npx playwright install --with-deps "${{ matrix.browser }}"
+          else
+            npx playwright install "${{ matrix.browser }}"
+          fi
 
       - name: 7. Run Browser End-to-End Navigation & Runtime Error Test
         working-directory: frontend
-        run: npm run test:e2e
+        run: npm run test:e2e -- --project=${{ matrix.browser }}
 
   macos-native:
     name: Build Native macOS Cocoa Launcher

@@ -1,47 +1,76 @@
-# ==============================================================================
-# Svorrent Automated Tag-to-Release Workflow
-#
-# Automatically triggers when a new version tag (e.g., v1.0.3) is pushed.
-# Builds the production distribution packages, computes cryptographic checksums,
-# and publishes the release assets directly to GitHub Releases.
-# ==============================================================================
-
-name: Automated Release
+name: Verified release
 
 on:
   push:
-    tags:
-      - 'v*.*.*'
+    tags: ['v*.*.*']
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build-and-release:
-    name: Build & Publish Release
-    runs-on: macos-latest
+  verify:
+    name: Test release source (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - name: 1. Checkout repository
-        uses: actions/checkout@v4
-
-      - name: 2. Setup Node.js 22.x
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 22.x
-
-      - name: 3. Install Frontend Dependencies & Build React Bundle
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+      - name: Check tag and package versions
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          cd frontend
+          node -e "const fs=require('node:fs'); const tag=process.env.RELEASE_TAG; for(const dir of ['backend','frontend']) { const version=JSON.parse(fs.readFileSync(dir+'/package.json')).version; if(tag !== 'v'+version) { console.error(dir+' version '+version+' does not match '+tag); process.exitCode=1; } }"
+      - name: Install, lint, and test frontend
+        shell: bash
+        working-directory: frontend
+        run: |
           npm ci
+          npm run lint
+          npm test
           npm run build
-
-      - name: 4. Install Backend Dependencies
+      - name: Install and test backend
+        shell: bash
+        working-directory: backend
         run: |
-          cd backend
           npm ci
+          npm test
+      - name: Install FFmpeg for real-media integration test
+        shell: bash
+        run: |
+          if command -v ffmpeg >/dev/null 2>&1; then exit 0; fi
+          case "$RUNNER_OS" in
+            Linux) sudo apt-get update && sudo apt-get install -y ffmpeg ;;
+            macOS) brew install ffmpeg ;;
+            Windows) choco install ffmpeg --yes --no-progress ;;
+          esac
+      - name: Verify synthetic torrent download and media playback
+        working-directory: backend
+        run: npm run test:e2e
 
-      - name: 5. Check signing and notarization secrets
-        id: signing
+  macos:
+    name: Build signed, notarized Mac DMG
+    runs-on: macos-latest
+    needs: verify
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+      - name: Install dependencies
+        run: |
+          (cd frontend && npm ci)
+          (cd backend && npm ci)
+      - name: Require signing credentials
         env:
           MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
@@ -52,25 +81,16 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
         run: |
           set -euo pipefail
-          missing=0
           for required in MACOS_CERTIFICATE_P12_BASE64 MACOS_CERTIFICATE_PASSWORD MACOS_SIGNING_IDENTITY KEYCHAIN_PASSWORD APPLE_ID APPLE_TEAM_ID APPLE_APP_SPECIFIC_PASSWORD; do
             if [ -z "${!required:-}" ]; then
-              echo "::warning::Missing $required; building with ad-hoc sealed bundle signature without notarization"
-              missing=1
+              echo "::error::Missing $required; refusing to publish an unsigned Mac release"
+              exit 1
             fi
           done
-          if [ "$missing" -eq 1 ]; then
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: 6. Import Developer ID certificate
-        if: steps.signing.outputs.ready == 'true'
+      - name: Import Developer ID certificate
         env:
           MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
           KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
         run: |
           set -euo pipefail
@@ -84,54 +104,126 @@ jobs:
           security import "$certificate" -k "$keychain" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$keychain"
           security find-identity -v -p codesigning "$keychain"
-
-      - name: 7. Build and sign macOS DMG Package
+      - name: Build, notarize, and staple DMG
         env:
-          SVORRENT_CODESIGN_IDENTITY: ${{ steps.signing.outputs.ready == 'true' && secrets.MACOS_SIGNING_IDENTITY || '-' }}
-        run: |
-          ./scripts/build-dmg.sh
-          ls -lh dist-app/Svorrent.dmg
-          codesign --verify --deep --strict --verbose=2 dist-app/Svorrent.app
-
-      - name: 8. Notarize and staple macOS DMG
-        if: steps.signing.outputs.ready == 'true'
-        env:
+          SVORRENT_SOURCE_COMMIT: ${{ github.sha }}
+          SVORRENT_CODESIGN_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
         run: |
           set -euo pipefail
-          xcrun notarytool submit dist-app/Svorrent.dmg \
-            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
-            --password "$APPLE_APP_SPECIFIC_PASSWORD" --wait
+          ./scripts/build-dmg.sh
+          codesign --verify --deep --strict --verbose=2 dist-app/Svorrent.app
+          xcrun notarytool submit dist-app/Svorrent.dmg --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --wait
           xcrun stapler staple dist-app/Svorrent.dmg
           xcrun stapler validate dist-app/Svorrent.dmg
-
-      - name: 9. Generate Cryptographic SHA-256 Checksums
-        run: |
-          cd dist-app
-          shasum -a 256 Svorrent.dmg > SHA256SUMS.txt
-          cat SHA256SUMS.txt
-
-      - name: 10. Publish GitHub Release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG_NAME="${{ github.ref_name }}"
-          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
-            echo "Release $TAG_NAME already exists; uploading assets..."
-            gh release upload "$TAG_NAME" \
-              dist-app/Svorrent.dmg \
-              dist-app/SHA256SUMS.txt \
-              --clobber
-          else
-            gh release create "$TAG_NAME" \
-              dist-app/Svorrent.dmg \
-              dist-app/SHA256SUMS.txt \
-              --title "$TAG_NAME" \
-              --generate-notes
-          fi
-
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: dist-app/Svorrent.dmg
+          if-no-files-found: error
       - name: Remove temporary signing keychain
-        if: always() && steps.signing.outputs.ready == 'true'
+        if: always()
         run: security delete-keychain "$RUNNER_TEMP/svorrent-signing.keychain-db" 2>/dev/null || true
+
+  windows:
+    name: Build signed Windows packages
+    runs-on: windows-latest
+    needs: verify
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+      - name: Install dependencies and build frontend
+        shell: pwsh
+        run: |
+          Push-Location frontend
+          npm ci
+          if ($LASTEXITCODE -ne 0) { throw 'Frontend install failed' }
+          npm run build
+          if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed' }
+          Pop-Location
+          Push-Location backend
+          npm ci
+          if ($LASTEXITCODE -ne 0) { throw 'Backend install failed' }
+          Pop-Location
+      - name: Require Windows signing credentials
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
+          SVORRENT_WINDOWS_PFX_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if (-not $env:WINDOWS_CERTIFICATE_PFX_BASE64 -or -not $env:SVORRENT_WINDOWS_PFX_PASSWORD) {
+            throw 'Windows signing credentials are missing; refusing to publish an unsigned installer'
+          }
+      - name: Install NSIS
+        shell: pwsh
+        run: |
+          choco install nsis --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'NSIS installation failed' }
+      - name: Build, sign, and verify installer
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
+          SVORRENT_WINDOWS_PFX_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $env:SVORRENT_WINDOWS_PFX = Join-Path $env:RUNNER_TEMP 'svorrent-signing.pfx'
+          try {
+            [IO.File]::WriteAllBytes($env:SVORRENT_WINDOWS_PFX, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_PFX_BASE64))
+            $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
+              $env:SVORRENT_WINDOWS_PFX, $env:SVORRENT_WINDOWS_PFX_PASSWORD)
+            $thumbprint = $certificate.Thumbprint.ToUpperInvariant()
+            & ./scripts/build-windows-snapshot.ps1 -SourceCommit $env:GITHUB_SHA -SignerThumbprint $thumbprint
+            if ($LASTEXITCODE -ne 0) { throw 'Windows build failed' }
+            $installer = 'dist-win/Svorrent-Setup.exe'
+            $signature = Get-AuthenticodeSignature -LiteralPath $installer
+            if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Thumbprint -cne $thumbprint) {
+              throw 'Installer signature verification failed'
+            }
+            Compress-Archive -Path 'dist-win/staging/*' -DestinationPath 'dist-win/Svorrent-Windows-x64-Portable.zip'
+          } finally {
+            Remove-Item -LiteralPath $env:SVORRENT_WINDOWS_PFX -Force -ErrorAction SilentlyContinue
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-packages
+          path: |
+            dist-win/Svorrent-Setup.exe
+            dist-win/Svorrent-Windows-x64-Portable.zip
+          if-no-files-found: error
+
+  publish:
+    name: Publish verified packages
+    runs-on: ubuntu-latest
+    needs: [verify, macos, windows]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-dmg
+          path: release
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-packages
+          path: release
+      - name: Check package set and create checksums
+        working-directory: release
+        run: |
+          set -euo pipefail
+          for asset in Svorrent.dmg Svorrent-Setup.exe Svorrent-Windows-x64-Portable.zip; do
+            test -s "$asset"
+          done
+          sha256sum Svorrent.dmg Svorrent-Setup.exe Svorrent-Windows-x64-Portable.zip > SHA256SUMS.txt
+      - name: Publish a new release only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "::error::Release $GITHUB_REF_NAME already exists; refusing to replace published assets"
+            exit 1
+          fi
+          gh release create "$GITHUB_REF_NAME" release/Svorrent.dmg release/Svorrent-Setup.exe release/Svorrent-Windows-x64-Portable.zip release/SHA256SUMS.txt --verify-tag --generate-notes --title "$GITHUB_REF_NAME"

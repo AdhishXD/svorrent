@@ -5,6 +5,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
+$appVersion = (Get-Content -LiteralPath (Join-Path $root 'backend/package.json') -Raw | ConvertFrom-Json).version
 $build = Join-Path $root 'dist-win'
 $staging = Join-Path $build 'staging'
 if ($SourceCommit -and $SourceCommit -cnotmatch '^[0-9a-f]{40}$') { throw 'Invalid source commit' }
@@ -59,7 +60,7 @@ $makensis = Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe'
 if (-not (Test-Path -LiteralPath $makensis)) { throw 'NSIS is missing; install it before building the Windows installer' }
 Push-Location $build
 try {
-    & $makensis 'installer.nsi'
+    & $makensis "/DSVORRENT_VERSION=$appVersion" 'installer.nsi'
     if ($LASTEXITCODE -ne 0) { throw 'NSIS installer compilation failed' }
 } finally {
     Pop-Location

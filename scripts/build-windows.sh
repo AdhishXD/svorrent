@@ -84,7 +84,8 @@ cp "$WIN_NODE_DATACHANNEL" "$STAGING_DIR/backend/node_modules/node-datachannel/b
 echo "==> 9. Compiling NSIS Windows Installer (Svorrent-Setup.exe)..."
 cp "$SCRIPTS_DIR/installer.nsi" "$BUILD_DIR/installer.nsi"
 cd "$BUILD_DIR"
-makensis installer.nsi
+APP_VERSION="$(node -p "require('$ROOT_DIR/backend/package.json').version")"
+makensis "/DSVORRENT_VERSION=$APP_VERSION" installer.nsi
 rm -f "$BUILD_DIR/installer.nsi"
 
 echo "==> 10. Generating Portable Windows ZIP (Svorrent-Windows-x64-Portable.zip)..."

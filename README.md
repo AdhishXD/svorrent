@@ -19,7 +19,7 @@
 
 ## Downloads (v1.0.3)
 
-Svorrent uses a local web interface. Desktop launchers start the backend and open the interface in your default browser. Node.js 18 or newer is required; the current packages do not bundle it.
+Svorrent uses a local web interface. Desktop launchers start the backend and open the interface in your default browser. Node.js 22.12 or newer is required; the current packages do not bundle it.
 
 | Platform | Package | Size | Description |
 | :--- | :--- | :--- | :--- |
@@ -150,7 +150,7 @@ svorrent/
 ## Getting Started from Source
 
 ### Prerequisites
-- Node.js (v18 or higher, recommended v22+)
+- Node.js 22.12 or newer
 - Optional: VLC Media Player (`/Applications/VLC.app` or `vlc` in PATH)
 - Optional: `ffprobe` for container runtime extraction
 
@@ -165,6 +165,7 @@ npm start
 The API service runs on `http://localhost:3001`. Downloads are written to `~/Downloads/Svorrent/`.
 For isolated local testing, `SVORRENT_DOWNLOAD_DIR` and `SVORRENT_DATA_DIR` can override those paths. Set `SVORRENT_DISABLE_PUBLIC_DISCOVERY=1` to disable DHT and bundled public trackers while retaining trackers supplied by a magnet link.
 With `ffmpeg` installed, run `cd backend && npm run test:e2e` for a synthetic, loopback-only torrent transfer, player launch, and cleanup check. The test uses a temporary download folder and does not touch `~/Downloads/Svorrent`.
+Run `cd frontend && npm run test:e2e` for isolated Chromium and WebKit UI tests, including a real loopback torrent download, SHA-256 verification, and deletion. Install both Playwright browsers with `npx playwright install chromium webkit` first. These tests use a temporary download folder.
 
 ### 2. Frontend Setup
 
@@ -189,6 +190,8 @@ npm run build:dmg
 cd backend
 npm run build:win
 ```
+
+Local unsigned packages are for development. Public releases require signed Mac and Windows builds from the same version tag; see [macOS signing](docs/releases/macos-signing.md), [Windows signing](docs/releases/windows-signing.md), and [dependency security](docs/dependency-security.md).
 
 ---
 

@@ -23,7 +23,9 @@ The release workflow imports the certificate into a temporary keychain, signs
 the app and embedded native code with hardened runtime, submits the DMG with
 `notarytool`, staples the accepted ticket, and only then publishes the DMG and
 its checksum. Missing credentials or a rejected notarization fails the workflow
-before a release asset is uploaded.
+before a release asset is uploaded. The tag workflow also requires a signed
+Windows installer from the same source commit and publishes all package checksums
+together. Existing release assets are not replaced automatically.
 
 The `main-snapshot.yml` workflow uses the same secrets to publish a signed,
 notarized DMG for each commit pushed to `main`. The DMG is named

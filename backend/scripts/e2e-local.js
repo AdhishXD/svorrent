@@ -80,9 +80,7 @@ try {
     ], { timeout: 30000, encoding: 'utf8' });
     if (generated && generated.status === 0) clipCreated = true;
   } catch {}
-  if (!clipCreated) {
-    fs.writeFileSync(video, Buffer.alloc(128 * 1024, 0x5a));
-  }
+  if (!clipCreated) throw new Error('ffmpeg is required to generate a real video for the media integration test');
 
   tracker = new TrackerServer({ http: true, udp: false, ws: false, stats: false, interval: 1000 });
   await new Promise((resolve, reject) => tracker.once('error', reject).listen(0, '127.0.0.1', resolve));
@@ -134,6 +132,10 @@ try {
   assert.equal(fs.existsSync(received), true);
   const digest = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
   assert.equal(digest(received), digest(video));
+  const decoded = spawnSync('ffmpeg', ['-v', 'error', '-i', received, '-f', 'null', '-'], {
+    timeout: 30000, encoding: 'utf8',
+  });
+  assert.equal(decoded.status, 0, `Downloaded video failed to decode: ${decoded.stderr || decoded.error || ''}`);
   console.log('Completed transfer; SHA-256 matches the source clip');
 
   const stats = await api(`/api/torrent/${infoHash}/nerd-stats`);
